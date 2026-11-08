@@ -1,0 +1,257 @@
+/* Qwix - game chrome. Same palette and type as the rest of ca13b
+   (public/style.css), with the playfield keeping its own arcade black. */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+  background: #0f0f0f;
+  color: #e4e4e4;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Top bar, same as the terminal pages */
+.topbar {
+  background: #1a1a1a;
+  border-bottom: 1px solid #2a2a2a;
+  padding: 12px 20px;
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.topbar .brand {
+  font-size: 16px;
+  font-weight: 600;
+  letter-spacing: 0.18em;
+  color: #7ef7c8;
+}
+.topbar .keys {
+  margin-left: auto;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  color: #8a8a8a;
+}
+
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  padding: 16px 20px 28px;
+}
+
+/* Score readout */
+.hud {
+  width: min(100%, 800px);
+  display: flex;
+  gap: 22px;
+  justify-content: center;
+  flex-wrap: wrap;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+.stat {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-width: 56px;
+}
+.stat b {
+  font-size: 17px;
+  font-weight: 600;
+  color: #ffffff;
+  letter-spacing: 0.06em;
+}
+.stat i {
+  font-style: normal;
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.14em;
+  color: #7a7a7a;
+}
+
+/* Claimed-area meter with the 85% line marked */
+.meter {
+  position: relative;
+  width: min(100%, 800px);
+  height: 14px;
+  background: #1b1b1b;
+  border: 1px solid #2a2a2a;
+  border-radius: 8px;
+  overflow: hidden;
+}
+.meter-fill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #1c7a52, #7ef7c8);
+  transition: width 0.12s linear;
+}
+.meter-target {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 85%;
+  width: 2px;
+  background: #fbbf24;
+  box-shadow: 0 0 6px #fbbf24;
+}
+/* The claimed share is a plain number in the readout above - a label inside the
+   bar was unreadable at any width. */
+.stat.claimed b {
+  color: #7ef7c8;
+}
+
+/* The playfield */
+.board {
+  position: relative;
+  width: min(100%, 800px);
+  line-height: 0;
+}
+.board canvas {
+  width: 100%;
+  height: auto;
+  display: block;
+  background: #06070a;
+  border: 1px solid #2a2a2a;
+  border-radius: 10px;
+  box-shadow: 0 0 40px rgba(126, 247, 200, 0.06);
+  touch-action: none;
+}
+
+/* Title / pause / level-clear / game-over card */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 20px;
+  background: rgba(5, 6, 8, 0.78);
+  border-radius: 10px;
+  line-height: 1.5;
+  -webkit-backdrop-filter: blur(2px);
+  backdrop-filter: blur(2px);
+}
+.overlay[hidden] {
+  display: none;
+}
+.panel {
+  max-width: 520px;
+  background: #15171a;
+  border: 1px solid #313a42;
+  border-radius: 16px;
+  padding: 22px 26px;
+  box-shadow: 0 18px 60px rgba(0, 0, 0, 0.6);
+}
+.panel h1 {
+  font-size: 22px;
+  letter-spacing: 0.22em;
+  color: #7ef7c8;
+  margin-bottom: 12px;
+}
+.panel p {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.6;
+  color: #b9b9b9;
+  white-space: pre-line;
+  margin-bottom: 18px;
+}
+.panel-actions {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.panel button {
+  font: inherit;
+  font-size: 14px;
+  font-weight: 600;
+  color: #06120d;
+  background: #7ef7c8;
+  border: none;
+  border-radius: 10px;
+  padding: 10px 22px;
+  cursor: pointer;
+}
+.panel button:hover,
+.panel button:focus-visible {
+  background: #a8ffdd;
+}
+/* The game-over card offers a second way out; the continue stays the loud one. */
+.panel button.secondary {
+  background: transparent;
+  border: 1px solid #3a4a44;
+  color: #9fb0a8;
+}
+.panel button.secondary:hover,
+.panel button.secondary:focus-visible {
+  background: #1d2a25;
+  color: #d6fff0;
+}
+
+/* Touch pad - only on devices without a keyboard worth using */
+.pads {
+  display: none;
+  width: min(100%, 800px);
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+.dpad {
+  display: grid;
+  grid-template-columns: repeat(3, 48px);
+  grid-template-rows: repeat(2, 48px);
+  gap: 6px;
+}
+.pad,
+.slow {
+  font: inherit;
+  font-size: 14px;
+  color: #e4e4e4;
+  background: #22262b;
+  border: 1px solid #333a42;
+  border-radius: 10px;
+  cursor: pointer;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.pad.up { grid-column: 2; grid-row: 1; }
+.pad.left { grid-column: 1; grid-row: 2; }
+.pad.down { grid-column: 2; grid-row: 2; }
+.pad.right { grid-column: 3; grid-row: 2; }
+.slow {
+  padding: 14px 22px;
+  font-size: 12px;
+  letter-spacing: 0.14em;
+}
+.slow.on {
+  background: #ff7a45;
+  border-color: #ff7a45;
+  color: #1a0d06;
+}
+.pad:active {
+  background: #343b44;
+}
+
+@media (pointer: coarse) {
+  .pads {
+    display: flex;
+  }
+  .topbar .keys {
+    display: none;
+  }
+}
+
+.footnote {
+  width: min(100%, 800px);
+  font-size: 12px;
+  line-height: 1.6;
+  color: #7a7a7a;
+}

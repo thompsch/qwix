@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Qwix - claim the field, dodge the Qix.">
+    <title>qwix</title>
+    <link rel="stylesheet" href="qwix.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <span class="brand">QWIX</span>
+      <span class="keys">arrows / wasd &middot; hold shift = slow draw &middot; p = pause</span>
+    </header>
+
+    <main class="stage">
+      <div class="hud">
+        <span class="stat"><b id="hud-score">0</b><i>score</i></span>
+        <span class="stat"><b id="hud-level">1</b><i>level</i></span>
+        <span class="stat claimed"><b id="hud-percent">0%</b><i>claimed</i></span>
+        <span class="stat"><b id="hud-lives">&#9670;&#9670;&#9670;</b><i>lives</i></span>
+        <span class="stat"><b id="hud-mult">x1</b><i>bonus</i></span>
+        <span class="stat"><b id="hud-best">0</b><i>best</i></span>
+      </div>
+
+      <div class="meter" role="img" aria-label="field claimed">
+        <div class="meter-fill" id="hud-fill"></div>
+        <div class="meter-target" title="85% clears the level"></div>
+      </div>
+
+      <div class="board">
+        <canvas id="field" width="800" height="600" aria-label="Qwix playfield"></canvas>
+        <div class="overlay" id="overlay" hidden>
+          <div class="panel">
+            <h1 id="overlay-title">QWIX</h1>
+            <p id="overlay-body"></p>
+            <div class="panel-actions">
+              <button id="overlay-button" type="button">Start</button>
+              <button id="overlay-button-2" class="secondary" type="button" hidden>New game</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="pads" aria-hidden="true">
+        <div class="dpad">
+          <button type="button" data-dir="0" class="pad up">&#9650;</button>
+          <button type="button" data-dir="3" class="pad left">&#9664;</button>
+          <button type="button" data-dir="2" class="pad down">&#9660;</button>
+          <button type="button" data-dir="1" class="pad right">&#9654;</button>
+        </div>
+        <button type="button" id="pad-slow" class="slow">SLOW</button>
+      </div>
+
+      <p class="footnote">
+        The original 1981 rules: the marker rides the lines &mdash; the frame, the
+        outline of your own ground, and every line you have drawn &mdash; and you
+        enclose empty space so that everything the Qix is not trapped in becomes
+        yours. Slow draw scores double. Sparx walk the outline, the fuse burns back
+        down a Stix you abandon, and from level 3 there are two Qixes to box in
+        &mdash; trap one in the smaller patch and its ground is yours, for a huge
+        bonus.
+      </p>
+    </main>
+
+    <script src="engine.js"></script>
+    <script src="qwix.js"></script>
+  </body>
+</html>

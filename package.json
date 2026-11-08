@@ -1,0 +1,14 @@
+{
+  "name": "qwix",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Qwix - the 1981 territory-claiming arcade game, in the browser. No dependencies, no build step.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "test": "node test/qwix.test.mjs && node test/qwix.hits.mjs && node test/qwix.progress.mjs && node test/qwix.smoke.mjs"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
