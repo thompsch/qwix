@@ -103,6 +103,8 @@ function boot(options) {
   // Not reset per frame: the block percentages are painted once, when a claim
   // repaints the field, so they would be lost if this were cleared each frame.
   const texts = [];
+  // Reset every frame: exactly what was painted this frame, for "shown at once".
+  const frameTexts = [];
 
   const ctx = new Proxy({}, {
     get(target, prop) {
@@ -133,7 +135,9 @@ function boot(options) {
       }
       if (prop === 'fillText') {
         return (text, x, y) => {
-          if (texts.length < 5000) texts.push({ text: String(text), x: Math.round(x), y: Math.round(y) });
+          const entry = { text: String(text), x: Math.round(x), y: Math.round(y) };
+          if (texts.length < 5000) texts.push(entry);
+          frameTexts.push(entry);
         };
       }
       if (prop === 'lineTo') {
@@ -231,6 +235,7 @@ function boot(options) {
       sparxPixels.length = 0;
       halos.length = 0;
       spineTips.length = 0;
+      frameTexts.length = 0;
       const cb = raf;
       raf = null;
       if (!cb) throw new Error('the game stopped asking for frames');
@@ -271,6 +276,9 @@ function boot(options) {
       return texts.some((t) => (pattern instanceof RegExp ? pattern.test(t.text)
         : t.text === pattern));
     },
+
+    /** Everything painted with fillText in the last frame, in paint order. */
+    frameTexts: () => frameTexts.map((t) => t.text),
     /**
      * Just the block percentages. Each one is painted twice - a dark offset copy
      * behind it so it reads over the shading - so identical neighbours collapse
@@ -728,6 +736,23 @@ function clearLevel(startPage, swept) {
     same('no summary card is shown', page.overlayUp(), false);
     same('the recap says the level is clear',
       page.sawNotice('LEVEL ' + levelCleared + ' CLEAR'), true);
+
+    // The recap is a stack: by the time the last line is in, every line is on the
+    // board in the same frame - and it gets there line by line, each one starting
+    // only once the one above it has finished fading in.
+    if (page.hud('hud-level') === String(levelCleared)) {
+      const seen = [];
+      let together = 0;
+      for (let t = 0; t < 40 && page.hud('hud-level') === String(levelCleared); t++) {
+        page.advance(60);
+        const drawn = page.frameTexts();
+        for (const text of drawn) if (/CLEAR|bonus|achiever|Qwix|quicker/.test(text)) seen.push(text);
+        together = Math.max(together, drawn.filter((text) => /CLEAR|bonus|achiever|Qwix|quicker/.test(text)).length);
+      }
+      same('the recap shows its whole stack at once',
+        [together, new Set(seen).size, together === new Set(seen).size],
+        [together, together, true]);
+    }
 
     // The Qix is not frozen by the end of a round: if the recap is still
     // playing, its drawn spines keep flexing behind the notices.
