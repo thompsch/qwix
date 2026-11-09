@@ -89,8 +89,8 @@ const cellAt = (field, cell) => [E.cellX(field, cell), E.cellY(field, cell)];
   near('but the ground it drew is still claimed', res.percent, 1.563);
 }
 
-// --- capture: two Qixes ---------------------------------------------------
-// Level 3+ has two Qixes. A Qix only holds ground while it has the roomiest
+// --- capture: two Qix ---------------------------------------------------
+// Level 3+ has two Qix. A Qix only holds ground while it has the roomiest
 // patch to run in: cut the board so each one is alone and the one in the
 // smaller patch is crushed, its ground taken, while the other keeps its own.
 {
@@ -98,7 +98,7 @@ const cellAt = (field, cell) => [E.cellX(field, cell), E.cellY(field, cell)];
   const trail = [];
   for (let y = 1; y <= 8; y++) trail.push(at(3, y));
   const res = E.resolveClaim(f, trail, [at(1, 4), at(7, 4)]);
-  check('two Qixes in two regions is a split', res.split, true);
+  check('two Qix in two regions is a split', res.split, true);
   check('and the ids differ', res.qixRegionIds[0] !== res.qixRegionIds[1], true);
   check('the Qix boxed into the smaller patch is the one that loses',
     [res.qixRegionIds[0] !== res.keptRegionId, res.qixRegionIds[1] === res.keptRegionId],
@@ -113,7 +113,7 @@ const cellAt = (field, cell) => [E.cellX(field, cell), E.cellY(field, cell)];
   const trail = [];
   for (let y = 1; y <= 8; y++) trail.push(at(3, y));
   const res = E.resolveClaim(f, trail, [at(6, 4), at(7, 4)]);
-  check('two Qixes sharing a region is not a split', res.split, false);
+  check('two Qix sharing a region is not a split', res.split, false);
   check('the free side is still claimed', res.claimed.length, 16);
   check('and the shared half stays open for them', res.percent, 37.5);
 }

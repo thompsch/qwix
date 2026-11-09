@@ -15,6 +15,20 @@ body {
   flex-direction: column;
 }
 
+/* The version being played, in the biggest type on the page - under the header,
+   above the readout and the board. */
+.mode {
+  padding: 4px 16px 0;
+  text-align: center;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: clamp(24px, 5vw, 44px);
+  font-weight: 700;
+  line-height: 1.1;
+  letter-spacing: 0.06em;
+  color: #7ef7c8;
+  text-shadow: 0 0 22px rgba(126, 247, 200, 0.35);
+}
+
 /* Top bar, same as the terminal pages */
 .topbar {
   background: #1a1a1a;
@@ -106,6 +120,15 @@ body {
 .stat.claimed b {
   color: #7ef7c8;
 }
+/* The level clock. Amber once the quick-win par has gone, so the player can see
+   at a glance that the pot is no longer on offer. */
+.stat.time b {
+  color: #cbd5e1;
+  font-variant-numeric: tabular-nums;
+}
+.stat.time.over b {
+  color: #ffb86b;
+}
 
 /* The playfield */
 .board {
@@ -192,6 +215,19 @@ body {
 .panel button.secondary:hover,
 .panel button.secondary:focus-visible {
   background: #1d2a25;
+  color: #d6fff0;
+}
+/* The menu's third way out - "How to play" - is quieter than either version. */
+.panel button.ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: #7f9a90;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.panel button.ghost:hover,
+.panel button.ghost:focus-visible {
+  background: transparent;
   color: #d6fff0;
 }
 
