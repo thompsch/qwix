@@ -14,12 +14,14 @@
     </header>
 
     <main class="stage">
+      <p class="mode" id="mode-label">Capture the Qwix</p>
+
       <div class="hud">
         <span class="stat"><b id="hud-score">0</b><i>score</i></span>
         <span class="stat"><b id="hud-level">1</b><i>level</i></span>
+        <span class="stat time"><b id="hud-time">0:00</b><i>time</i></span>
         <span class="stat claimed"><b id="hud-percent">0%</b><i>claimed</i></span>
         <span class="stat"><b id="hud-lives">&#9670;&#9670;&#9670;</b><i>lives</i></span>
-        <span class="stat"><b id="hud-mult">x1</b><i>bonus</i></span>
         <span class="stat"><b id="hud-best">0</b><i>best</i></span>
       </div>
 
@@ -37,6 +39,7 @@
             <div class="panel-actions">
               <button id="overlay-button" type="button">Start</button>
               <button id="overlay-button-2" class="secondary" type="button" hidden>New game</button>
+              <button id="overlay-button-3" class="ghost" type="button" hidden>How to play</button>
             </div>
           </div>
         </div>
@@ -57,7 +60,7 @@
         outline of your own ground, and every line you have drawn &mdash; and you
         enclose empty space so that everything the Qix is not trapped in becomes
         yours. Slow draw scores double. Sparx walk the outline, the fuse burns back
-        down a Stix you abandon, and from level 3 there are two Qixes to box in
+        down a Stix you abandon, and every level starts with two Qix to box in
         &mdash; trap one in the smaller patch and its ground is yours, for a huge
         bonus.
       </p>

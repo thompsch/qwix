@@ -22,11 +22,51 @@
   var START_LIVES = 3;
   var SCORE_PER_CELL = 6;
   var SLOW_BONUS = 2;          // an area drawn entirely slow scores double
-  var LEVEL_BONUS_PER_PERCENT = 500;
+  var OVER_TARGET_PER_PERCENT = 2000; // each point claimed past the target pays
   var TRAP_BONUS = 50000;      // a Qix walled in and taken: the payday
+  var SPEED_BONUS_PER_SECOND = 10000; // ...and 10,000 for every second under par
+  var FAST_WIN_PAR_MS = 20000; // the par is 20 seconds for 85% of the board,
+                               // on every level - it does not grow with the level
+  var SURVIVOR_BONUS = 50000;  // ...or, in the other variant, per Qix left alive
   var LIFE_EVERY_POINTS = 1000000; // a life for the first million...
   var LIFE_LEVEL_STEP = 100000;    // ...and dearer by this much every level after
   var MAX_MULTIPLIER = 9;
+  var MULTIPLIER_EVERY_LEVELS = 10; // the bonus multiplier steps up this often
+
+  // --- two ways to score the same game --------------------------------------
+  // `traps` is the original: wall a Qix in and it pays 50,000 then and there.
+  // `survivors` pays nothing for a kill, and instead hands over a bonus at the
+  // end of the level for every Qix still alive beyond the first. Pick with
+  // ?variant=survivors on the URL; ?variant=traps is the default.
+  // --- the two versions, and what the menu calls them -------------------------
+  // "Capture" is the one where you keep them: a kill pays nothing and every Qix
+  // still alive at the clear is worth a share. "Kill" is the one where a Qix is
+  // erased from the board and pays for it. The labels live here with the rules.
+  var VARIANTS = {
+    survivors: {
+      name: 'survivors', label: 'Capture the Qwix',
+      trapBonus: false, survivorBonus: true, requireLastQix: false,
+    },
+    traps: {
+      name: 'traps', label: 'Kill the Qwix',
+      trapBonus: true, survivorBonus: false, requireLastQix: true,
+    },
+  };
+
+  // A run starts on the first of the two - the menu's loud button, which is
+  // "Capture the Qwix".
+  var RULES = VARIANTS.survivors;
+
+  /**
+   * Start a run on one of the two versions. The menu's buttons land here; the
+   * rules are swapped before the board is built, so everything downstream - the
+   * trap payout, the survivors pot, the help - reads the version that was chosen.
+   * A version always starts a fresh run: level 1, no score.
+   */
+  function playVersion(name) {
+    RULES = VARIANTS[name] || VARIANTS.survivors;
+    newRun();
+  }
 
   // --- speeds, in milliseconds per cell ------------------------------------
   var MOVE_MS = 22;
@@ -40,10 +80,24 @@
   // --- timers ---------------------------------------------------------------
   var FUSE_GRACE_MS = 420;     // how long you may stand still before it lights
   var FUSE_STEP_MS = 90;
+  // A short Stix is dangerous out of proportion to its length: the spark only has
+  // to cross a cell or two, so it reaches the marker almost the instant it lights
+  // - a one-cell line kills 90 ms after the fuse appears. Anything shorter than
+  // 50 px (five cells) is therefore given extra grace, one burn step's worth for
+  // every cell it is short, so a dab of a line is no deadlier than a long one.
+  var FUSE_SHORT_PX = 50;
+  var FUSE_SHORT_GRACE_MS = 120;
   var DEATH_MS = 1200;
-  var LEVEL_CLEAR_MS = 2000;
   var INVULN_MS = 1400;
-  var SUPER_AFTER_MS = 42000;  // Sparx mutate into Super Sparx after this
+  // Sparx turn hostile - and hunt - once the marker has stood still for this long:
+  // 15 seconds, on every level. Moving resets it, so a player who keeps moving is
+  // never hunted; a hunt that has started lasts until you die or clear the level.
+  var SPARX_IDLE_MS = 15000;
+  // A board starts with the hunt clock switched off: it starts when the marker
+  // first moves, or after this long if the player simply sits there, so nobody
+  // is hunted while they are still reading the board.
+  var OPENING_GRACE_MS = 45000;
+  var NOTICE_MS = 2000;  // how long one recap notice stays on the board
   // One Sparx, plus another every twenty levels: two from level 20, three from
   // 40, and that is as busy as the board gets.
   var SPARX_EVERY_LEVELS = 20;
@@ -59,15 +113,22 @@
   var QIX_BODY = 2;            // cells of clearance the figure keeps from walls
   var QIX_TOUCH = 3;           // radius of the body, in cells, before growth
   var QIX_HIT_WIDTH = 0.55;    // half-thickness of a spine against marker or stix
+  var QIX_DEATH_MS = 900;      // how long a killed figure takes to explode
+  var QIX_DEATH_RINGS = 3;     // staggered shockwaves
+  var QIX_DEATH_SHARDS = 16;   // flying pieces of the figure
 
-  // One Qix, a second from level 3, and another every forty levels after that.
-  var QIX_FROM_LEVEL = 3;
-  var QIX_EVERY_LEVELS = 40;
+  // Two Qix on every level, and another every ten levels after that (three from
+  // 10, four from 20) - a board starts with a crowd, not with one figure.
+  var QIX_EVERY_LEVELS = 10;
   var QIX_SPREAD = 14;         // how far apart they start, in cells
 
   // It gets bigger the longer a level lasts: +75% over two minutes, then no more.
-  var QIX_GROWTH_MAX = 0.75;
-  var QIX_GROWTH_MS = 120000;
+  // Growth is slow on purpose: a level used to be over long before the figure
+  // got big, and with two Qix from level 1 a level lasts twice as long, so the
+  // old schedule had level 1 running at 1.75x its base size. Five minutes and
+  // a ceiling of +50% keeps the early game at the size it always had.
+  var QIX_GROWTH_MAX = 0.5;
+  var QIX_GROWTH_MS = 300000;
 
   // Speed steps up every QIX_SPEED_EVERY levels, then tops out. It starts fast
   // and moves in bursts, but never quite faster than the marker can run the
@@ -92,7 +153,18 @@
   var QIX_DASH_FACTOR = 1.8;
   var QIX_DASH_GAP_MS = 700;   // how often it considers a lunge
 
-  var CAPTURE_COLORS = ['#1c7a52', '#2a6f9e', '#6b4fa8', '#a85f2a', '#2a8f95'];
+  // Claimed ground, one shade per level. Deliberately all cool: a hunting Sparx
+  // is red, so no level may paint its ground orange or red, or the figure would
+  // vanish into it (level 4 used to be an orange that swallowed it).
+  var CAPTURE_COLORS = ['#1c7a52', '#2a6f9e', '#6b4fa8', '#41547a', '#2a8f95'];
+  var SPARX_CALM = '#c9a0ff'; // patrolling
+  var SPARX_HUNT = '#ff4d6d'; // hunting - always red, whatever the ground is
+
+  /** The claimed-ground colour for a level. */
+  function captureColor(level) {
+    var at = Math.max(1, level === undefined ? S.level : level);
+    return CAPTURE_COLORS[(at - 1) % CAPTURE_COLORS.length];
+  }
 
   var canvas = document.getElementById('field');
   var ctx = canvas.getContext('2d');
@@ -106,18 +178,21 @@
   var hud = {
     score: document.getElementById('hud-score'),
     level: document.getElementById('hud-level'),
+    time: document.getElementById('hud-time'),
     lives: document.getElementById('hud-lives'),
-    mult: document.getElementById('hud-mult'),
     best: document.getElementById('hud-best'),
     percent: document.getElementById('hud-percent'),
     fill: document.getElementById('hud-fill'),
   };
+  // The version being played, in the biggest type on the page.
+  var modeLabel = document.getElementById('mode-label');
   var overlay = {
     root: document.getElementById('overlay'),
     title: document.getElementById('overlay-title'),
     body: document.getElementById('overlay-body'),
     button: document.getElementById('overlay-button'),
     button2: document.getElementById('overlay-button-2'),
+    button3: document.getElementById('overlay-button-3'),
   };
 
   var S = null;
@@ -152,21 +227,28 @@
       level: 1,
       multiplier: 1,
       best: readBest(),
+      ranked: true,         // false when the run began above level 1 (the picker)
       player: emptyPlayer(),
       qixes: [],
       sparx: [],
       fuse: { active: false, pos: 0, acc: 0 },
-      levelTime: 0,
       levelAge: 0,
+      anim: 0,              // board animation time: runs until a pause or a card
+      sinceBoard: 0,        // ms this board has been in front of the player
+      awaitingFirstLine: true, // the hunt clock is held until the first Stix
+      sinceLine: 0,         // ms since a Stix was last being drawn
       super: false,
       invulnUntil: 0,
       fieldDirty: true,
       clearInfo: null,
       trapDone: false,
+      toldNeedKills: false, // the "Qix to go" banner: once a level
       nextLifeAt: LIFE_EVERY_POINTS,
       blocks: [],
       deathSpot: null,
+      deaths: [],           // killed figures, still collapsing on screen
       flash: null,
+      flashQueue: [],
     };
     resetBoard();
     syncOverlay();
@@ -183,25 +265,42 @@
     p.dir = E.LEFT;
     clearTrail();
     S.qixes = buildQixes();
+    // A new level starts calm, and with the hunt clock held off until the player
+    // draws their first line (or has sat there for OPENING_GRACE_MS).
+    S.super = false;
+    S.sinceBoard = 0;
+    S.awaitingFirstLine = true;
+    S.sinceLine = 0;
     S.sparx = buildSparxWave();
     S.fuse.active = false;
-    S.levelTime = 0;
-    S.levelAge = 0; // the Qix's growth clock, which a death does not rewind
-    S.super = false;
+    S.levelAge = 0; // the level's play clock: the Qix's growth, and the win time
+    S.multiplier = bonusMultiplier(); // x1, and one more every ten levels
     S.trapDone = false;
+    S.toldNeedKills = false;
     S.blocks = [];
+    S.deaths.length = 0;
     S.deathSpot = null;
     S.flash = null;
+    S.flashQueue.length = 0;
     S.invulnUntil = S.now + INVULN_MS;
   }
 
   /**
-   * How many Qixes a level runs with: one to begin with, two from level 3, and
-   * another every forty levels after that (three from 40, four from 80...).
+   * The bonus multiplier for a level: x1 to begin with, one higher every ten
+   * levels, capped at 9. Every payout in the game is multiplied by it, so it is
+   * the level's own measure of how deep you are - not something a kill moves.
+   */
+  function bonusMultiplier(level) {
+    var at = Math.max(1, level === undefined ? S.level : level);
+    return Math.min(MAX_MULTIPLIER, 1 + Math.floor(at / MULTIPLIER_EVERY_LEVELS));
+  }
+
+  /**
+   * How many Qix a level runs with: two from the very first level, and another
+   * every ten levels after that (three from 10, four from 20...).
    */
   function qixCount(level) {
     var at = level === undefined ? S.level : level;
-    if (at < QIX_FROM_LEVEL) return 1;
     return 2 + Math.floor(at / QIX_EVERY_LEVELS);
   }
 
@@ -304,7 +403,9 @@
 
   /**
    * The level's Sparx, spread as far from the marker - and from each other - as
-   * the outline allows, so they never arrive in a clump.
+   * the outline allows, so they never arrive in a clump. A new wave takes the
+   * mode the level is in: if the level has already turned red, the replacements
+   * come back red.
    */
   function buildSparxWave() {
     var out = [];
@@ -327,7 +428,7 @@
         }
       }
       if (!best) break;
-      out.push({ x: best.x, y: best.y, dir: E.RIGHT, acc: 0, super: false });
+      out.push({ x: best.x, y: best.y, dir: E.RIGHT, acc: 0, super: S.super });
     }
     return out;
   }
@@ -341,6 +442,7 @@
   }
 
   function saveBest() {
+    if (!S.ranked) return; // started above level 1: score does not count
     if (S.score <= S.best) return;
     S.best = S.score;
     try {
@@ -352,7 +454,19 @@
 
   // --- the clock ------------------------------------------------------------
 
+  /**
+   * Only the death pause runs on its own. The level-clear card waits for the
+   * player, because it is the one moment in the game worth reading.
+   */
   function update(dt) {
+    updateFlash(dt); // the notices run in every state, including a clear
+    // The figures animate off this clock. It runs while the game is live and on
+    // through the end-of-level recap, so a cleared level leaves the Qix alive
+    // behind the notices; only a pause or a card stops it.
+    if (S.state === 'playing' || S.state === 'levelclear') {
+      S.anim += dt;
+      updateDeaths(dt); // a kill landing on the winning stroke still plays out
+    }
     if (S.state === 'playing') {
       tick(dt);
       return;
@@ -360,18 +474,23 @@
     if (S.state === 'dying') {
       S.timer -= dt;
       if (S.timer <= 0) afterDeath();
-      return;
     }
     if (S.state === 'levelclear') {
+      // No card to dismiss any more: the recap plays out and the next level
+      // follows it. Enter/skip still works - see confirmAction.
       S.timer -= dt;
-      if (S.timer <= 0) {
-        S.level += 1;
-        S.clearInfo = null;
-        resetBoard();
-        S.state = 'playing';
-        syncOverlay();
-      }
+      if (S.timer <= 0 && !S.flash && !S.flashQueue.length) nextLevel();
     }
+  }
+
+  /** Off the clearance card and into the next level. */
+  function nextLevel() {
+    if (S.state !== 'levelclear') return;
+    S.level += 1;
+    S.clearInfo = null;
+    resetBoard();
+    S.state = 'playing';
+    syncOverlay();
   }
 
   function tick(dt) {
@@ -396,16 +515,18 @@
 
   function updatePlayer(dt) {
     var p = S.player;
-    var dir = input.dir();
     var moved = false;
-    if (dir >= 0) {
+    if (chooseDir() >= 0) {
       var stepMs = stepMsFor(p);
       p.acc += dt;
       var guard = 0;
       while (p.acc >= stepMs && guard < 4) {
         guard += 1;
         p.acc -= stepMs;
-        if (!playerStep(dir)) {
+        // Re-ask each step: a turn that was blocked a moment ago may have opened
+        // up now the marker has moved a cell closer to it.
+        var dir = chooseDir();
+        if (dir < 0 || !playerStep(dir)) {
           p.acc = 0;
           break;
         }
@@ -415,10 +536,53 @@
     } else {
       p.acc = 0;
     }
-    // How long the marker has been unable (or unwilling) to move. The fuse
-    // measures this rather than the key state, so holding a direction into a
-    // wall is not a way to stand still safely.
+    // How long the marker has been unable (or unwilling) to move. This is the
+    // fuse's clock - it measures stillness, not the key state, so holding a
+    // direction into a wall is not a way to stand still safely. The Sparx
+    // hunt reads a different clock: how long it has been since a line was
+    // drawn (see updateLevelClock).
     p.still = moved ? 0 : p.still + dt;
+  }
+
+  /**
+   * Which way to step this frame. The newest key held is what the player asked
+   * for; with two keys down they have asked for a *turn* while they keep going,
+   * so on an existing line the marker holds its heading until the turn is
+   * actually available and takes it the moment it is. While drawing a Stix only
+   * the newest key counts - a line is a commitment, and the fuse is the price of
+   * dithering over it.
+   */
+  function chooseDir() {
+    if (!held.length) return -1;
+    var want = held[held.length - 1];
+    if (canStep(want)) return want;
+    var p = S.player;
+    if (p.drawing) return want; // blocked: the marker waits, as it always has
+    // Keep the heading, if that key is still down and the way is still clear...
+    if (held.indexOf(p.dir) >= 0 && canStep(p.dir)) return p.dir;
+    // ...or any other direction still being held, newest first.
+    for (var i = held.length - 2; i >= 0; i--) {
+      if (canStep(held[i])) return held[i];
+    }
+    return want;
+  }
+
+  /**
+   * Would a step in this direction work from where the marker stands? Pure - no
+   * moving, no claiming - so a direction can be tried without side effects.
+   */
+  function canStep(dir) {
+    var p = S.player;
+    var v = E.VECTORS[dir];
+    var nx = p.x + v[0];
+    var ny = p.y + v[1];
+    if (!E.inBounds(S.field, nx, ny)) return false;
+    if (p.drawing) {
+      if (dir === E.opposite(p.dir)) return false;            // no backtracking
+      return !p.trailMask[E.index(S.field, nx, ny)];           // no crossing your Stix
+    }
+    // Open space is fine - it starts a Stix. Shaded ground only if it is a line.
+    return !E.isFilled(S.field, nx, ny) || E.isWalkable(S.field, nx, ny);
   }
 
   /**
@@ -428,16 +592,13 @@
    * Stix closes it, which is the only way to win anything.
    */
   function playerStep(dir) {
+    if (!canStep(dir)) return false;
     var p = S.player;
     var v = E.VECTORS[dir];
     var nx = p.x + v[0];
     var ny = p.y + v[1];
-    if (!E.inBounds(S.field, nx, ny)) return false;
-    var cell = E.index(S.field, nx, ny);
 
     if (p.drawing) {
-      if (dir === E.opposite(p.dir)) return false; // no backtracking
-      if (p.trailMask[cell]) return false;         // no crossing your own Stix
       p.dir = dir;
       p.x = nx;
       p.y = ny;
@@ -445,15 +606,15 @@
         closeClaim();
         return true;
       }
-      addTrail(cell);
+      addTrail(E.index(S.field, nx, ny));
       return true;
     }
 
     if (E.isFilled(S.field, nx, ny)) {
       // Shaded ground is solid, except along the old Stix lines drawn through
       // it: the marker rides the frame, the outline of what it owns, and every
-      // line it has closed an area with.
-      if (!E.isWalkable(S.field, nx, ny)) return false;
+      // line it has closed an area with. canStep has already checked that this
+      // one is walkable.
       p.x = nx;
       p.y = ny;
       p.dir = dir;
@@ -466,7 +627,7 @@
     p.lineStart = { x: p.x, y: p.y }; // where this line began, for respawning
     p.x = nx;
     p.y = ny;
-    addTrail(cell);
+    addTrail(E.index(S.field, nx, ny));
     return true;
   }
 
@@ -518,24 +679,46 @@
     var crushed = 0;
     S.qixes = S.qixes.filter(function (q, i) {
       var keeps = res.qixRegionIds[i] === res.keptRegionId;
-      if (!keeps) crushed += 1;
+      if (!keeps) {
+        crushed += 1;
+        startQixDeath(q); // it keeps collapsing for a moment, on screen
+      }
       return keeps;
     });
 
-    // A split (each Qix alone in its own patch) is the big score: it pays out
-    // once, and raising the multiplier is the reward for the cut that made it.
-    // A Qix buried where there is no open cell left is just as trapped, and it
-    // can happen on the stroke that also wins the round, so the bonus is paid
-    // before the level is allowed to finish and is carried onto that card.
-    var trapBonus = crushed > 0 ? awardTrap(crushed) : 0;
+    // A split (each Qix alone in its own patch) is the big score in the `traps`
+    // rules: it pays out once, and raising the multiplier is the reward for the
+    // cut that made it. A Qix buried where there is no open cell left is just as
+    // trapped, and it can happen on the stroke that also wins the round, so the
+    // bonus is paid before the level is allowed to finish and is carried onto
+    // that card. Under the `survivors` rules a kill pays nothing - it only costs
+    // you a share of the end-of-level pot - so it just says so.
+    var trapBonus = 0;
+    if (crushed > 0) {
+      if (RULES.trapBonus) {
+        trapBonus = awardTrap(crushed);
+      } else {
+        flash(crushed + ' QIX KILLED: ' + S.qixes.length + ' still out there', 2000);
+      }
+    }
 
     // A Qix left standing on ground that just became ours has nowhere to live.
     ensureQixesLegal();
+    // The same goes for a Sparx that was standing on ground that just became
+    // ours - most likely on the Stix this claim has just closed.
+    for (var si = 0; si < S.sparx.length; si++) homeSparx(S.sparx[si]);
     // ...and the closing cell can end up buried inside the new shading, which
     // would strand the marker off the lines entirely.
     snapMarkerToLine();
 
-    if (S.percent >= TARGET_PERCENT) finishLevel(trapBonus);
+    if (levelComplete()) {
+      finishLevel(trapBonus);
+    } else if (S.percent >= TARGET_PERCENT && !S.toldNeedKills) {
+      // Full enough, but Kill the Qwix wants the crowd down to one first: say so
+      // once, rather than ending the level and leaving the player puzzled.
+      S.toldNeedKills = true;
+      flash(S.qixes.length + ' QIX TO GO   the level ends with one left', 2600);
+    }
 
     // Whatever the stroke paid - area, trap, level bonus - it might have bought
     // a life on the way.
@@ -564,7 +747,7 @@
       gained += 1;
     }
     if (!gained) return;
-    flash('EXTRA ' + (gained > 1 ? gained + ' LIVES' : 'LIFE') + '   lives ' + S.lives, 2200);
+    flashNow('EXTRA ' + (gained > 1 ? gained + ' LIVES' : 'LIFE') + '   lives ' + S.lives, 2200);
   }
 
   /**
@@ -573,14 +756,14 @@
    * once and the amount is returned for the level card to quote.
    */
   function awardTrap(crushed) {
+    if (!RULES.trapBonus) return 0; // this variant pays at the clear instead
     if (S.trapDone) return 0;
     S.trapDone = true;
     var bonus = TRAP_BONUS * S.multiplier;
     S.score += bonus;
-    if (S.multiplier < MAX_MULTIPLIER) S.multiplier += 1;
     saveBest();
     flash(
-      (crushed > 1 ? 'QIXES' : 'QIX') + ' TRAPPED  +' + bonus + '   bonus x' + S.multiplier,
+      crushed + ' QIX KILLED  +' + bonus,
       2600
     );
     return bonus;
@@ -623,22 +806,139 @@
 
   /** A short banner across the field, for the one moment worth shouting about. */
   function flash(text, ms) {
-    S.flash = { text: text, until: S.now + ms, ms: ms };
+    S.flashQueue.push({ text: text, ms: ms || 2000 });
+  }
+
+  /**
+   * A notice that will not wait its turn: the head of the queue, and whatever is
+   * on screen is wrapped up quickly so it cannot be long behind. The extra life
+   * uses this - it is news at the moment it happens, not a footnote to a recap.
+   */
+  function flashNow(text, ms) {
+    var left = ms || NOTICE_MS;
+    if (S.flash && S.flash.left > 500) S.flash.left = 500;
+    S.flashQueue.unshift({ text: text, ms: left });
+  }
+
+  /**
+   * Play the notices one after another: the head of the queue becomes the
+   * banner for its own duration, then the next one takes over. This is what the
+   * level-clear recap is made of, so it has to be a queue rather than a single
+   * slot.
+   */
+  function updateFlash(dt) {
+    if (S.flash) {
+      S.flash.left -= dt;
+      if (S.flash.left > 0) return;
+      S.flash = null;
+    }
+    if (!S.flashQueue.length) return;
+    var next = S.flashQueue.shift();
+    S.flash = { text: next.text, left: next.ms, ms: next.ms };
+  }
+
+  /**
+   * Under the `survivors` rules, every Qix still on the board beyond the first
+   * is worth a bonus when the level is cleared - so the reward is for keeping
+   * the crowd alive, not for killing it off.
+   */
+  function survivorBonusFor(alive, multiplier) {
+    return Math.max(0, alive - 1) * SURVIVOR_BONUS * multiplier;
+  }
+
+  /**
+   * The par: 20 seconds, the same on every level. It does not grow with the
+   * level - the speed demon bonus is for a fast clear, full stop - so a deep level
+   * with three Qix and a red wave is simply harder to win it on.
+   */
+  function parMs() {
+    return FAST_WIN_PAR_MS;
+  }
+
+  /**
+   * The speed demon bonus: the full bonus for a level taken instantly, falling in a
+   * straight line to nothing at par, and nothing at all beyond it.
+   */
+  /**
+   * The speed bonus: 10,000 a second for every whole second finished inside the
+   * par, multiplied like everything else. Clear in 12 s of a 20 s par and it pays
+   * eight seconds' worth; clear on the par and it pays nothing.
+   */
+  function fastWinBonus(ms, multiplier) {
+    var par = parMs();
+    var spent = Math.max(0, ms || 0);
+    var under = Math.max(0, Math.floor((par - spent) / 1000));
+    return under * SPEED_BONUS_PER_SECOND * multiplier;
+  }
+
+  /** 72345 -> "1:12", for the clearance card. */
+  function duration(ms) {
+    var total = Math.max(0, Math.round((ms || 0) / 1000));
+    var mins = Math.floor(total / 60);
+    var secs = total % 60;
+    return mins + ':' + (secs < 10 ? '0' + secs : secs);
+  }
+
+  /**
+   * Is the level done? Both versions want `TARGET_PERCENT` of the field. Kill the
+   * Qwix adds a second condition: every Qix but one has to be gone, so filling the
+   * board alone never ends a level while a crowd is still on it.
+   */
+  function levelComplete() {
+    if (S.percent < TARGET_PERCENT) return false;
+    return !RULES.requireLastQix || S.qixes.length <= 1;
   }
 
   function finishLevel(trapBonus) {
-    var over = Math.max(0, S.percent - TARGET_PERCENT);
-    var bonus = Math.round(over * LEVEL_BONUS_PER_PERCENT * S.multiplier);
-    S.score += bonus;
+    // The survivors pot is paid first, like the trap bonus it replaces, so the
+    // multiplier step it earns counts for the area bonus below it. Only the ones
+    // beyond the first pay, but the card reports the whole crowd.
+    var alive = S.qixes.length;
+    var survivors = 0;
+    var extra = 0;
+    if (RULES.survivorBonus) {
+      extra = Math.max(0, alive - 1);
+      if (extra > 0) {
+        survivors = survivorBonusFor(alive, S.multiplier);
+        S.score += survivors;
+      }
+    }
+
+    // Two bonuses for a job well done: the ground you took past the target, and
+    // the clock - a level can be won on the last stroke of the fuse or at a
+    // sprint, and the sprint is worth something.
+    // Whole points past the target only: 85.4% is on the number, not over it.
+    var over = Math.max(0, Math.floor(S.percent) - TARGET_PERCENT);
+    var overBonus = Math.round(over * OVER_TARGET_PER_PERCENT * S.multiplier);
+    var winBonus = fastWinBonus(S.levelAge, S.multiplier);
+    S.score += overBonus + winBonus;
     saveBest();
     S.clearInfo = {
-      bonus: bonus,
+      bonus: overBonus,
+      winBonus: winBonus,
+      over: over,
+      levelMs: S.levelAge,
+      parMs: parMs(),
       percent: S.percent,
       trapBonus: trapBonus || 0,
+      survivors: survivors,
+      extraQixes: extra,
+      qixesAlive: RULES.survivorBonus ? alive : 0,
       faster: speedAtLevel(S.level + 1) > speedAtLevel(S.level),
     };
+
+    // The end of a round is announced the way everything else in the game is
+    // announced: queued notices across the board, one after another. No card,
+    // and nothing to dismiss - the next level follows the last notice.
+    var notes = ['LEVEL ' + S.level + ' CLEAR'];
+    if (trapBonus) notes.push('Qwix Killed: ' + bigNumber(trapBonus));
+    if (survivors) notes.push('Qwix Captured: ' + bigNumber(survivors));
+    if (winBonus) notes.push('Speed bonus: ' + bigNumber(winBonus));
+    if (overBonus) notes.push('Over achiever: ' + bigNumber(overBonus));
+    if (S.clearInfo.faster) notes.push('The Qix is quicker from here on.');
+    for (var n = 0; n < notes.length; n++) flash(notes[n], NOTICE_MS);
+    S.timer = notes.length * NOTICE_MS + 400;
     S.state = 'levelclear';
-    S.timer = LEVEL_CLEAR_MS;
     syncOverlay();
   }
 
@@ -682,9 +982,14 @@
     }
 
     for (var i = 0; i < S.qixes.length; i++) relocateQix(S.qixes[i]);
-    S.sparx = buildSparxWave();
+    // A death calms the wave: red was for the run you just lost. The hunt clock is
+    // held off again too, so the marker gets the same opening grace it had on a
+    // fresh board.
     S.super = false;
-    S.levelTime = 0;
+    S.sinceBoard = 0;
+    S.awaitingFirstLine = true;
+    S.sinceLine = 0;
+    S.sparx = buildSparxWave();
     S.invulnUntil = S.now + INVULN_MS;
     S.state = 'playing';
     syncOverlay();
@@ -862,6 +1167,87 @@
 
   // --- the Sparx ------------------------------------------------------------
 
+  /** Where a hunting Sparx may travel: the outline, and the old Stix lines. */
+  function sparxCanStand(x, y) {
+    return E.isBoundaryCell(S.field, x, y) || E.isLine(S.field, x, y);
+  }
+
+  // Distance from every standable cell to the marker, rebuilt at most once a
+  // frame. Reused buffers, because this runs while the game is drawing.
+  var chaseDist = new Int32Array(COLS * ROWS);
+  var chaseQueue = new Int32Array(COLS * ROWS);
+  var chaseAt = -1;
+
+  /**
+   * Breadth-first from the marker - or from the Stix, while one is out, since a
+   * hunting Sparx may run that too - across everything a Sparx can stand on. The
+   * result is a distance field the red ones can follow as a gradient, which is
+   * what turns "it noticed you" into "it is coming".
+   */
+  function chaseField() {
+    if (chaseAt === S.now) return chaseDist;
+    chaseAt = S.now;
+
+    var p = S.player;
+    chaseDist.fill(-1);
+    var tail = 0;
+
+    if (p.drawing && p.trail.length) {
+      for (var t = 0; t < p.trail.length; t++) {
+        chaseDist[p.trail[t]] = 0;
+        chaseQueue[tail++] = p.trail[t];
+      }
+    } else {
+      var start = E.index(S.field, p.x, p.y);
+      chaseDist[start] = 0;
+      chaseQueue[tail++] = start;
+    }
+
+    for (var head = 0; head < tail; head++) {
+      var cell = chaseQueue[head];
+      var cx = E.cellX(S.field, cell);
+      var cy = E.cellY(S.field, cell);
+      for (var d = 0; d < 4; d++) {
+        var nx = cx + E.VECTORS[d][0];
+        var ny = cy + E.VECTORS[d][1];
+        if (!E.inBounds(S.field, nx, ny)) continue;
+        var next = E.index(S.field, nx, ny);
+        if (chaseDist[next] !== -1) continue;
+        if (!sparxCanStand(nx, ny)) continue;
+        chaseDist[next] = chaseDist[cell] + 1;
+        chaseQueue[tail++] = next;
+      }
+    }
+    return chaseDist;
+  }
+
+  /** One step down the gradient toward the marker. False if there is no route. */
+  function chaseStep(s) {
+    var dist = chaseField();
+    var here = dist[E.index(S.field, s.x, s.y)];
+    if (here <= 0) return false; // no route, or already on the marker
+
+    // Continue the way it is facing when two steps are as good as each other.
+    var order = [s.dir, (s.dir + 1) % 4, (s.dir + 3) % 4, E.opposite(s.dir)];
+    var best = null;
+    var bestDist = here;
+    for (var i = 0; i < 4; i++) {
+      var d = order[i];
+      var nx = s.x + E.VECTORS[d][0];
+      var ny = s.y + E.VECTORS[d][1];
+      if (!E.inBounds(S.field, nx, ny)) continue;
+      var nd = dist[E.index(S.field, nx, ny)];
+      if (nd < 0 || nd >= bestDist) continue;
+      bestDist = nd;
+      best = { x: nx, y: ny, dir: d };
+    }
+    if (!best) return false;
+    s.x = best.x;
+    s.y = best.y;
+    s.dir = best.dir;
+    return true;
+  }
+
   function updateSparx(dt) {
     for (var i = 0; i < S.sparx.length; i++) {
       var s = S.sparx[i];
@@ -878,18 +1264,20 @@
   }
 
   /**
-   * Sparx ride the outline of everything claimed. Super Sparx may also run up
-   * an unfinished Stix, which is what makes long slow draws a gamble.
+   * A red Sparx hunts: it follows the distance field to the marker, and steps
+   * onto the Stix the moment it is alongside one. Only when there is no route at
+   * all does it fall back to patrolling the outline.
    */
   function sparxStep(s) {
     var p = S.player;
-    if (s.super && p.drawing) {
-      var here = E.index(S.field, s.x, s.y);
-      if (p.trailMask[here]) {
-        stepTrailTowardPlayer(s, here);
-        return;
-      }
-      if (Math.random() < 0.18) {
+    if (s.super) {
+      if (chaseStep(s)) return;
+      if (p.drawing) {
+        var here = E.index(S.field, s.x, s.y);
+        if (p.trailMask[here]) {
+          stepTrailTowardPlayer(s, here);
+          return;
+        }
         var target = adjacentTrailCell(s);
         if (target >= 0) {
           setSparxCell(s, target);
@@ -905,7 +1293,27 @@
       s.dir = next.dir;
       return;
     }
-    s.dir = E.opposite(s.dir);
+    // Nowhere to walk: this cell has no boundary neighbour at all. That means the
+    // outline has closed over it, so put it back on the outline rather than let
+    // it sit here flipping its heading for the rest of the level.
+    if (!homeSparx(s)) s.dir = E.opposite(s.dir);
+  }
+
+  /**
+   * A claim can shade the cell a Sparx stands on right out of the outline - most
+   * easily a red one, which is allowed to climb the Stix that has just closed,
+   * but also a patrolling one on a sliver of outline that the new ground
+   * swallows. It is stranded there: `nextBoundaryStep` has nowhere to go from a
+   * cell with no boundary neighbour. Send it to the nearest piece of outline.
+   */
+  function homeSparx(s) {
+    if (E.isBoundaryCell(S.field, s.x, s.y)) return false;
+    var cell = E.nearestBoundaryCell(S.field, E.index(S.field, s.x, s.y), COLS + ROWS);
+    if (cell < 0) return false;
+    s.x = E.cellX(S.field, cell);
+    s.y = E.cellY(S.field, cell);
+    s.acc = 0;
+    return true;
   }
 
   function stepTrailTowardPlayer(s, fromCell) {
@@ -947,11 +1355,13 @@
    * burns back towards the marker. Moving again puts it out - and so does
    * anything that resets the trail, which is why this is measured off the
    * marker's own stillness rather than the keys.
+   *
+   * How long "stand still" means depends on the Stix: see fuseGrace.
    */
   function updateFuse(dt) {
     var p = S.player;
     var f = S.fuse;
-    if (!p.drawing || p.still < FUSE_GRACE_MS) {
+    if (!p.drawing || p.still < fuseGrace()) {
       f.active = false;
       f.acc = 0;
       return;
@@ -974,6 +1384,18 @@
     }
   }
 
+  /**
+   * How long the marker may stand still mid-draw before the fuse lights: 420 ms,
+   * plus 120 ms for every cell the Stix is short of 50 px. A long line is
+   * unchanged; a one-cell dab gets 900 ms, which is the difference between a
+   * reflex test the player cannot pass and a mistake they can recover from.
+   */
+  function fuseGrace() {
+    var shortCells = Math.round(FUSE_SHORT_PX / CELL);
+    var under = Math.max(0, shortCells - S.player.trail.length);
+    return FUSE_GRACE_MS + under * FUSE_SHORT_GRACE_MS;
+  }
+
   // --- what kills you -------------------------------------------------------
 
   /**
@@ -984,8 +1406,8 @@
     var scale = q.scale || 1;
     for (var i = 0; i < q.segs.length; i++) {
       var seg = q.segs[i];
-      seg.angle = seg.a + Math.sin(S.now * 0.0035 + seg.phase) * 0.8;
-      seg.reach = seg.len * (0.65 + 0.35 * Math.sin(S.now * 0.005 + seg.phase * 1.7))
+      seg.angle = seg.a + Math.sin(S.anim * 0.0035 + seg.phase) * 0.8;
+      seg.reach = seg.len * (0.65 + 0.35 * Math.sin(S.anim * 0.005 + seg.phase * 1.7))
         * QIX_SIZE * scale;
     }
   }
@@ -1065,18 +1487,61 @@
   // --- level pacing ---------------------------------------------------------
 
   /**
-   * The only thing that happens inside a level is the Sparx turning super. How
-   * many Sparx there are is a property of the level itself (see sparxCount), so
-   * there is nothing to release here.
+   * Two things happen inside a level: the Qix grows (on `S.levelAge`) and the
+   * Sparx lose patience. How many Sparx there are is a property of the level
+   * itself (see sparxCount), so there is nothing to release here.
+   *
+   * The patience clock is the marker's own stillness - `S.player.still`, which
+   * `updatePlayer` clears on every step it takes. So a player who keeps moving is
+   * never hunted, however long they go without claiming anything: the wave only
+   * turns on someone who has parked.
    */
   function updateLevelClock(dt) {
-    S.levelTime += dt;
     S.levelAge += dt; // survives deaths, so the figure keeps what it has grown
-    var superAt = Math.max(12000, SUPER_AFTER_MS - (S.level - 1) * 5000);
-    if (!S.super && S.levelTime >= superAt) {
-      S.super = true;
-      for (var i = 0; i < S.sparx.length; i++) S.sparx[i].super = true;
+
+    // The opening grace: nothing is counted until the player starts their first
+    // line, or OPENING_GRACE_MS goes by with them doing nothing at all. Its own
+    // timer, not levelAge, because levelAge survives a death and would skip the
+    // grace on a respawn.
+    if (S.awaitingFirstLine) {
+      S.sinceBoard += dt;
+      if (S.player.drawing || S.sinceBoard >= OPENING_GRACE_MS) {
+        S.awaitingFirstLine = false;
+      }
     }
+
+    // Inactivity means *not drawing*. A Stix is activity and holds the clock at
+    // zero; walking the lines - however busy it looks - is not, so pacing the
+    // outline does not keep the wave calm. Only taking ground does.
+    if (S.awaitingFirstLine || S.player.drawing) {
+      S.sinceLine = 0;
+    } else {
+      S.sinceLine += dt;
+    }
+
+    if (!S.super && S.sinceLine >= sparxIdleAllowance()) setHunting(true);
+  }
+
+  /**
+   * How long the marker may stand still before the Sparx turn: 15 seconds, the
+   * same on every level. It used to tighten with the level, which meant a deep
+   * level could turn a wave hostile almost immediately.
+   */
+  function sparxIdleAllowance() {
+    return SPARX_IDLE_MS;
+  }
+
+  /**
+   * Turn the whole wave red: they hunt, they step quicker, and they may climb an
+   * open Stix. This is a one-way door inside a level - nothing calls this with
+   * `false` once a level is under way, because red lasts until the board is
+   * cleared and the next level builds a new, violet wave.
+   */
+  function setHunting(on) {
+    if (S.super === on) return;
+    S.super = on;
+    for (var i = 0; i < S.sparx.length; i++) S.sparx[i].super = on;
+    if (on) flash('SPARX HUNTING', 2600);
   }
 
 
@@ -1106,7 +1571,7 @@
     c.stroke();
 
     // Claimed area, painted as horizontal runs rather than 4800 rectangles.
-    c.fillStyle = CAPTURE_COLORS[(S.level - 1) % CAPTURE_COLORS.length];
+    c.fillStyle = captureColor();
     var cells = S.field.cells;
     for (var y = 1; y < ROWS - 1; y++) {
       var runStart = -1;
@@ -1160,6 +1625,7 @@
     drawStix();
     drawFuse();
     drawQix();
+    drawDeaths();
     drawSparx();
     drawMarker();
     drawFlash();
@@ -1169,8 +1635,8 @@
   /** The one banner in the game: a split just paid out. */
   function drawFlash() {
     var f = S.flash;
-    if (!f || S.now > f.until) return;
-    var left = (f.until - S.now) / (f.ms || 1);
+    if (!f || f.left <= 0) return;
+    var left = f.left / (f.ms || 1);
     ctx.save();
     ctx.globalAlpha = Math.min(1, Math.max(0, left * 2.5));
     ctx.font = 'bold 26px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
@@ -1222,6 +1688,122 @@
     ctx.restore();
   }
 
+  // --- a killed figure collapsing ------------------------------------------
+  // A Qix that loses its patch is gone from the board, but not instantly: a
+  // snapshot of the figure is played out as an implosion, so the player sees the
+  // kill rather than a figure blinking out of existence. Pure decoration -
+  // nothing here is in the hit test.
+
+  /** Snapshot the figure and queue it for the death animation. */
+  function startQixDeath(q) {
+    flexQix(q); // settle its spines so the snapshot matches what was on screen
+    var segs = [];
+    for (var i = 0; i < q.segs.length; i++) {
+      segs.push({ angle: q.segs[i].angle, reach: q.segs[i].reach });
+    }
+    S.deaths.push({
+      x: q.x, y: q.y, hue: q.hue, segs: segs, scale: q.scale || 1, age: 0,
+      // Deterministic, so the burst looks the same in a test as on screen.
+      seed: ((q.x * 7 + q.y * 13) % 360) * Math.PI / 180,
+    });
+    while (S.deaths.length > 4) S.deaths.shift(); // nothing old is worth keeping
+  }
+
+  function updateDeaths(dt) {
+    for (var i = S.deaths.length - 1; i >= 0; i--) {
+      S.deaths[i].age += dt;
+      if (S.deaths[i].age >= QIX_DEATH_MS) S.deaths.splice(i, 1);
+    }
+  }
+
+  function drawDeaths() {
+    for (var d = 0; d < S.deaths.length; d++) {
+      var death = S.deaths[d];
+      var age = death.age;
+      var t = Math.min(1, age / QIX_DEATH_MS);
+      if (t >= 1) continue;
+      var fade = 1 - t;
+      var cx = death.x * CELL;
+      var cy = death.y * CELL;
+      var scale = death.scale;
+
+      // 1. A white-hot core for the first fifth: the instant of the kill. Drawn
+      //    translucent rather than solid white, which the renderer uses for the
+      //    marker itself.
+      var flare = Math.max(0, 1 - age / (QIX_DEATH_MS * 0.22));
+      if (flare > 0) {
+        ctx.save();
+        ctx.fillStyle = 'rgba(255, 255, 255, ' + (0.85 * flare).toFixed(3) + ')';
+        ctx.shadowColor = 'hsl(' + death.hue + ', 100%, 70%)';
+        ctx.shadowBlur = 26;
+        ctx.beginPath();
+        ctx.arc(cx, cy, (3 + 13 * t) * scale, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.restore();
+      }
+
+      // 2. Three shockwaves, each a little later, wider and fainter than the last.
+      for (var r = 0; r < QIX_DEATH_RINGS; r++) {
+        var delay = r * 110;
+        if (age < delay) continue;
+        var rt = Math.min(1, (age - delay) / (QIX_DEATH_MS - delay));
+        var ringFade = (1 - rt) * (1 - rt);
+        ctx.save();
+        ctx.strokeStyle = 'hsla(' + ((death.hue + r * 40) % 360) + ', 100%, ' +
+          (74 - r * 6) + '%, ' + (0.7 * ringFade).toFixed(3) + ')';
+        ctx.lineWidth = 1 + 3.5 * ringFade;
+        ctx.beginPath();
+        ctx.arc(cx, cy, (5 + (34 + r * 16) * rt) * scale, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.restore();
+      }
+
+      // 3. Shrapnel: the figure breaking into pieces that fly out, slow down and
+      //    fade, the hue cycling as they cool. Position is a function of age, so
+      //    there is no particle state to keep.
+      ctx.save();
+      ctx.lineCap = 'round';
+      for (var i = 0; i < QIX_DEATH_SHARDS; i++) {
+        var angle = death.seed + (i / QIX_DEATH_SHARDS) * Math.PI * 2 + (i % 3 - 1) * 0.16;
+        var own = (age - (i % 5) * 22) / QIX_DEATH_MS;
+        if (own <= 0) continue;
+        var at = Math.min(1, own);
+        var dist = (8 + 74 * Math.sqrt(at)) * scale; // fast out of the gate, then dragging
+        var len = (4 + 10 * (1 - at)) * scale;
+        var alpha = Math.max(0, 1 - at) * 0.9;
+        ctx.strokeStyle = 'hsla(' + ((death.hue + i * 23 + at * 150) % 360) + ', 100%, 72%, ' +
+          alpha.toFixed(3) + ')';
+        ctx.lineWidth = 1 + 2 * (1 - at);
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(angle) * dist, cy + Math.sin(angle) * dist);
+        ctx.lineTo(cx + Math.cos(angle) * (dist + len), cy + Math.sin(angle) * (dist + len));
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // 4. What is left of the figure itself: the spines whirl inwards, shrink and
+      //    go out, in its own colours, so it reads as the one that was killed.
+      ctx.save();
+      ctx.globalAlpha = Math.max(0, fade);
+      ctx.lineCap = 'round';
+      ctx.lineWidth = 2.5;
+      for (var s = 0; s < death.segs.length; s++) {
+        var seg = death.segs[s];
+        var spin = seg.angle + t * (2.6 + s * 0.4); // every spine whirls, none alike
+        var reach = seg.reach * Math.pow(1 - t, 1.6) * scale;
+        ctx.strokeStyle = 'hsla(' + ((death.hue + s * 47) % 360) + ', 100%, 62%, ' +
+          Math.max(0, fade).toFixed(3) + ')';
+        ctx.shadowColor = ctx.strokeStyle;
+        ctx.shadowBlur = 12;
+        ctx.beginPath();
+        ctx.moveTo(cx, cy);
+        ctx.lineTo(cx + Math.cos(spin) * reach * CELL, cy + Math.sin(spin) * reach * CELL);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
   function drawQix() {
     for (var i = 0; i < S.qixes.length; i++) {
       var q = S.qixes[i];
@@ -1262,8 +1844,24 @@
       var r = CELL * 0.7;
       ctx.save();
       ctx.translate(px(s.x), px(s.y));
-      ctx.rotate(S.now * 0.006 + i);
-      ctx.strokeStyle = s.super ? '#ff4d6d' : '#c9a0ff';
+
+      // The halo is the hunting tell, so only a hunting Sparx has one: a bright
+      // yellow ring with a glow behind the red cross. A patrolling one is just the
+      // violet cross on the board.
+      if (s.super) {
+        ctx.fillStyle = 'rgba(255, 224, 102, 0.26)';
+        ctx.strokeStyle = 'rgba(255, 224, 102, 0.95)';
+        ctx.shadowColor = '#ffe066';
+        ctx.shadowBlur = 16;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(0, 0, CELL * 1.15, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+      }
+
+      ctx.rotate(S.anim * 0.006 + i);
+      ctx.strokeStyle = s.super ? SPARX_HUNT : SPARX_CALM;
       ctx.shadowColor = ctx.strokeStyle;
       ctx.shadowBlur = 10;
       ctx.lineWidth = 2;
@@ -1288,7 +1886,7 @@
     var r = CELL * 0.85;
     ctx.save();
     ctx.translate(px(p.x), px(p.y));
-    ctx.rotate(S.now * 0.004);
+    ctx.rotate(S.anim * 0.004);
     ctx.fillStyle = '#ffffff';
     ctx.shadowColor = '#7ef7c8';
     ctx.shadowBlur = 14;
@@ -1314,12 +1912,23 @@
   }
 
   function syncHud() {
+    setText(modeLabel, RULES.label); // 'Capture the Qwix' / 'Kill the Qwix'
     setText(hud.score, String(S.score));
     setText(hud.level, String(S.level));
     setText(hud.lives, S.lives > 0 ? new Array(S.lives + 1).join('\u25C6') : '\u2014');
-    setText(hud.mult, 'x' + S.multiplier);
-    setText(hud.best, String(Math.max(S.best, S.score)));
+    setText(hud.best, String(S.ranked ? Math.max(S.best, S.score) : S.best));
     setText(hud.percent, Math.floor(S.percent) + '%');
+
+    // The level clock: the same S.levelAge the speed demon par is measured against,
+    // so what the player reads is exactly what the bonus is judged on. It turns
+    // amber once the par has gone.
+    setText(hud.time, duration(S.levelAge));
+    var overPar = S.levelAge >= parMs();
+    if (hud.time && shown.timeOver !== overPar) {
+      shown.timeOver = overPar;
+      hud.time.className = overPar ? 'stat time over' : 'stat time';
+    }
+
     var width = Math.min(100, Math.max(0, S.percent)).toFixed(1) + '%';
     if (shown.fill !== width) {
       shown.fill = width;
@@ -1333,41 +1942,158 @@
     return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
   }
 
-  /** One card, one title, one or two buttons. */
-  function showCard(title, body, primary, secondary) {
+  /** 1000000 -> "1 million", 500000 -> "500,000", for prose in the cards. */
+  function bigNumber(n) {
+    if (n >= 1000000 && n % 1000000 === 0) return (n / 1000000) + ' million';
+    return String(n).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+  }
+
+  /**
+   * The over-target line: the ground claimed past the target, which pays by the
+   * point. Silent when the level was won exactly on the number.
+   */
+  function overTargetLine(info) {
+    if (!info.bonus) return null;
+    var over = info.over || 0;
+    return 'Over the ' + TARGET_PERCENT + '% target by ' + (Math.round(over * 10) / 10) +
+      '%: +' + bigNumber(info.bonus) + ' points.';
+  }
+
+  /** The speed demon line: what beating the par by that much was worth. */
+  function winLine(info) {
+    if (!info.winBonus) return null;
+    var par = info.parMs || parMs();
+    return 'Speed demon bonus: in ' + duration(info.levelMs) + ', ' +
+      duration(par - info.levelMs) + ' inside the ' + duration(par) + ' par - +' +
+      bigNumber(info.winBonus) + ' points.';
+  }
+
+  /** Everything the level paid on top of the area score, in one figure. */
+  function bonusTotalLine(info) {
+    var total = (info.bonus || 0) + (info.winBonus || 0) +
+      (info.trapBonus || 0) + (info.survivors || 0);
+    if (!total) return null;
+    return 'Bonuses this level: +' + bigNumber(total) + ' points.';
+  }
+
+  /** One card, one title, up to three buttons. */
+  function showCard(title, body, primary, secondary, tertiary) {
     var o = overlay;
     o.title.textContent = title;
     o.body.textContent = body;
     o.button.textContent = primary;
     o.button.hidden = false;
-    if (secondary) {
-      o.button2.textContent = secondary;
-      o.button2.hidden = false;
-    } else {
-      o.button2.hidden = true;
-    }
+    setThirdButton(o.button2, secondary);
+    setThirdButton(o.button3, tertiary);
     o.root.hidden = false;
+  }
+
+  /** A card button, shown only when the card actually has one to offer. */
+  function setThirdButton(el, label) {
+    if (!el) return;
+    if (label) {
+      el.textContent = label;
+      el.hidden = false;
+    } else {
+      el.hidden = true;
+    }
+  }
+
+  /**
+   * Everything the menu used to say, moved off the menu and onto its own card.
+   * The two scoring lines name the versions the menu offers, so picking one is
+   * not a guess.
+   */
+  function helpText() {
+    return [
+      RULES.requireLastQix
+        ? 'Claim ' + TARGET_PERCENT + '% of the field and kill every Qix but one to clear a level.'
+        : 'Claim ' + TARGET_PERCENT + '% of the field to clear a level.',
+      'Draw a Stix into open space, then close it: every region the Qix is not in becomes yours.',
+      'The marker rides the lines - the frame, the outline of your ground, and every line you have drawn.',
+      'Arrows or WASD to move. Hold Shift for a slow draw - an area drawn entirely slow scores double.',
+      'Every point claimed past ' + TARGET_PERCENT + '% pays ' + bigNumber(OVER_TARGET_PER_PERCENT) +
+        ', and a level cleared inside its par pays ' + bigNumber(SPEED_BONUS_PER_SECOND) +
+          ' a second for every second it is under.',
+      'A life every ' + bigNumber(LIFE_EVERY_POINTS) + ' points, and dearer as the levels climb.',
+      VARIANTS.traps.label + ': wall a Qix in and it pays ' + bigNumber(TRAP_BONUS) +
+        ' then and there.',
+      VARIANTS.survivors.label + ': a kill pays nothing, and every Qix still alive when you ' +
+        'clear a level pays ' + bigNumber(SURVIVOR_BONUS) + ' beyond the first.',
+      'Do not stand still mid-draw (the fuse lights) and do not let the Qix touch your Stix.',
+      'Stop moving and the Sparx start hunting you, and they keep hunting until you die or clear the level.',
+      'Press H for this card, P or Escape to pause.',
+    ].join('\n');
+  }
+
+  /** The version menu. */
+  function openHelp() {
+    if (S.state !== 'title') return;
+    S.state = 'help';
+    syncOverlay();
+  }
+
+  function closeHelp() {
+    if (S.state !== 'help') return;
+    S.state = 'title';
+    syncOverlay();
+  }
+
+  // --- a hidden start-level picker ------------------------------------------
+  // Type a number on the menu and the version you then pick begins at that
+  // level. Nothing advertises it: the card only grows a line once you have typed
+  // something, so a player who never tries it never sees it.
+  var TYPED_MAX_DIGITS = 3;
+  var typedLevel = ''; // digits typed at the menu; '' means none
+
+  function typedLevelNumber() {
+    return typedLevel ? Math.max(1, Number(typedLevel)) : 0;
+  }
+
+  function typeDigit(d) {
+    if (S.state !== 'title' || typedLevel.length >= TYPED_MAX_DIGITS) return false;
+    if (!typedLevel && d === '0') return false; // 0 is not a level, and no leading zeros
+    typedLevel += d;
+    syncOverlay();
+    return true;
+  }
+
+  function backspaceDigit() {
+    if (S.state !== 'title' || !typedLevel) return false;
+    typedLevel = typedLevel.slice(0, -1);
+    syncOverlay();
+    return true;
+  }
+
+  function clearTypedLevel() {
+    if (!typedLevel) return false;
+    typedLevel = '';
+    syncOverlay();
+    return true;
   }
 
   function syncOverlay() {
     var o = overlay;
+    // 'levelclear' is deliberately absent: the end of a round is announced with
+    // notices across the board, not with a card.
     var visible =
-      S.state === 'title' || S.state === 'paused' ||
-      S.state === 'levelclear' || S.state === 'gameover';
+      S.state === 'title' || S.state === 'help' || S.state === 'paused' ||
+      S.state === 'gameover';
     if (!visible) {
       o.root.hidden = true;
       return;
     }
 
     if (S.state === 'title') {
-      showCard('QWIX', [
-        'Claim ' + TARGET_PERCENT + '% of the field to clear a level.',
-        'Draw a Stix into open space, then close it: every region the Qix is not in becomes yours.',
-        'The marker rides the lines - the frame, the outline of your ground, and every line you have drawn.',
-        'Arrows or WASD to move. Hold Shift for a slow draw - an area drawn entirely slow scores double.',
-        'A life every ' + bigNumber(LIFE_EVERY_POINTS) + ' points, and dearer as the levels climb.',
-        'Do not stand still mid-draw (the fuse lights) and do not let the Qix touch your Stix.',
-      ].join('\n'), 'Start');
+      showCard('QWIX',
+        'Which version do you want to play? Capture the Qwix or Kill the Qwix' +
+          (typedLevelNumber() ? '\nStarting on level ' + typedLevelNumber() + '.' : ''),
+        VARIANTS.survivors.label, VARIANTS.traps.label, 'How to play');
+      return;
+    }
+
+    if (S.state === 'help') {
+      showCard('HOW TO PLAY', helpText(), 'Back');
       return;
     }
 
@@ -1379,20 +2105,17 @@
       return;
     }
 
-    if (S.state === 'levelclear') {
-      var info = S.clearInfo || { bonus: 0, percent: S.percent, faster: false, trapBonus: 0 };
-      showCard('LEVEL ' + S.level + ' CLEAR', [
-        Math.floor(info.percent) + '% claimed - bonus ' + info.bonus + ' points.',
-        info.trapBonus ? 'Qix trapped on the way out: +' + info.trapBonus + ' points, bonus x' + S.multiplier + '.' : null,
-        info.faster ? 'The Qix is quicker from here on.' : null,
-      ].filter(Boolean).join('\n'), 'Continue');
-      return;
-    }
 
     showCard('GAME OVER', [
       'Score ' + S.score + ' on level ' + S.level + '. Best ' + S.best + '.',
       'Continue retries level ' + S.level + ' with a fresh field and ' + START_LIVES + ' lives, keeping your score.',
-    ].join('\n'), 'Continue level ' + S.level, 'New game');
+    ].join('\n'), 'Continue level ' + S.level, 'New game', 'Menu');
+  }
+
+  /** Back to the version menu, so the other version is reachable without a reload. */
+  function backToMenu() {
+    S.state = 'title';
+    syncOverlay();
   }
 
 
@@ -1407,9 +2130,6 @@
   var touchSlow = false;
 
   var input = {
-    dir: function () {
-      return held.length ? held[held.length - 1] : -1;
-    },
     get slow() {
       return this.forceSlow || touchSlow;
     },
@@ -1418,8 +2138,9 @@
 
   function hold(dir) {
     // Starting from the title card must not eat the keypress that started it,
-    // so the game boots first and the direction is held afterwards.
-    if (S.state === 'title') startGame();
+    // so the game boots first and the direction is held afterwards. A direction
+    // starts a fresh run on whichever version the menu last used.
+    if (S.state === 'title') newRun();
     if (held.indexOf(dir) < 0) held.push(dir);
   }
 
@@ -1438,9 +2159,35 @@
       input.forceSlow = true;
       return;
     }
+    if (S.state === 'title') {
+      // The hidden picker: digits name the level to start on, Backspace unpicks
+      // them, Escape throws the lot away.
+      if (/^[0-9]$/.test(e.key)) {
+        e.preventDefault();
+        typeDigit(e.key);
+        return;
+      }
+      if (e.key === 'Backspace' || e.key === 'Delete') {
+        e.preventDefault();
+        backspaceDigit();
+        return;
+      }
+      if (e.key === 'Escape') {
+        clearTypedLevel();
+        return;
+      }
+    }
     if (e.key === ' ' || e.key === 'Enter') {
       e.preventDefault();
       confirmAction();
+      return;
+    }
+    if (e.key === 'h' || e.key === 'H') {
+      openHelp(); // only meaningful on the menu; a no-op anywhere else
+      return;
+    }
+    if (S.state === 'help' && e.key === 'Escape') {
+      closeHelp();
       return;
     }
     if (e.key === 'p' || e.key === 'P' || e.key === 'Escape') togglePause();
@@ -1509,9 +2256,14 @@
 
   function confirmAction() {
     if (S.state === 'title') {
-      startGame();
+      // The loud button: the first of the two versions.
+      playVersion(VARIANTS.survivors.name);
+    } else if (S.state === 'help') {
+      closeHelp();
     } else if (S.state === 'paused') {
       togglePause();
+    } else if (S.state === 'levelclear') {
+      nextLevel();
     } else if (S.state === 'gameover') {
       continueGame();
     }
@@ -1522,6 +2274,9 @@
    * field and a full set of lives.
    */
   function continueGame() {
+    // A continue is a fresh attempt at the level: the score starts again from
+    // zero, though the level you reached is kept.
+    S.score = 0;
     S.lives = START_LIVES;
     S.state = 'playing';
     resetBoard();
@@ -1530,7 +2285,13 @@
 
   /** Wipe the slate: level 1, no score, no multiplier, no score milestones. */
   function newRun() {
-    S.level = 1;
+    // The hidden picker is one-shot: the level you typed, or 1 - and the next new
+    // game starts at 1 again unless you go back to the menu and type another.
+    S.level = typedLevelNumber() || 1;
+    typedLevel = '';
+    // A run that begins anywhere but level 1 is not a high-score attempt: it has
+    // skipped the levels that would have earned the score.
+    S.ranked = S.level === 1;
     S.score = 0;
     S.lives = START_LIVES;
     S.multiplier = 1;
@@ -1540,8 +2301,22 @@
 
   overlay.button.addEventListener('click', confirmAction);
   overlay.button2.addEventListener('click', function () {
-    if (S.state === 'gameover') newRun();
+    if (S.state === 'gameover') {
+      newRun();
+      return;
+    }
+    // The second version, from the menu.
+    if (S.state === 'title') playVersion(VARIANTS.traps.name);
   });
+  if (overlay.button3) {
+    overlay.button3.addEventListener('click', function () {
+      if (S.state === 'title') {
+        openHelp();
+      } else if (S.state === 'gameover') {
+        backToMenu();
+      }
+    });
+  }
 
   // --- go -------------------------------------------------------------------
 

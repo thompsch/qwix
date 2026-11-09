@@ -4,7 +4,7 @@
  * The game is two <script> tags and a canvas, so all this has to do is hand out
  * files with the right content type and refuse to walk out of the directory.
  *
- *   npm start            # http://localhost:3000
+ *   npm start            # http://localhost:3333
  *   PORT=8080 npm start
  *
  * Opening index.html straight off the disk (file://) works too - nothing here
