@@ -717,7 +717,7 @@
       // Full enough, but Kill the Qwix wants the crowd down to one first: say so
       // once, rather than ending the level and leaving the player puzzled.
       S.toldNeedKills = true;
-      flash(S.qixes.length + ' QIX TO GO   the level ends with one left', 2600);
+      flash(S.qixes.length + ' QIX TO GO. There can only be one left!', 2600);
     }
 
     // Whatever the stroke paid - area, trap, level bonus - it might have bought
