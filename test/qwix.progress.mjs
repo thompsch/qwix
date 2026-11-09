@@ -39,6 +39,10 @@ globalThis.document = {
 globalThis.localStorage = { getItem: () => null, setItem: noop };
 globalThis.requestAnimationFrame = noop;
 
+// The end-of-level recap is a stack drawn on the canvas (`S.recap.lines`), not a
+// queue of notices (`S.flashQueue`, which still carries the live banners).
+const recapLines = (S) => (S.recap ? S.recap.lines.slice() : []);
+
 const GAME = fs.readFileSync(new URL('../qwix.js', import.meta.url), 'utf8');
 const PROBE = GAME.replace(
   '  requestAnimationFrame(frame);\n})();',
@@ -50,6 +54,7 @@ const PROBE = GAME.replace(
   + ' chooseDir, canStep, hold, release, playerStep, updatePlayer, update, VARIANTS,'
        + ' typeDigit, backspaceDigit, clearTypedLevel, typedLevelNumber, startQixDeath, saveBest,'
        + ' updateDeaths, QIX_DEATH_MS, QIX_DEATH_RINGS, QIX_DEATH_SHARDS, levelComplete,'
+       + ' RECAP_FADE_MS, RECAP_STAGGER_MS, RECAP_HOLD_MS, RECAP_FADE_OUT_MS, recapTotalMs, updateRecap,'
   + ' bonusMultiplier, captureColor, CAPTURE_COLORS, SPARX_CALM, SPARX_HUNT,'
   + ' parMs, fastWinBonus, duration, TARGET_PERCENT, OVER_TARGET_PER_PERCENT,'
        + ' SPEED_BONUS_PER_SECOND,'
@@ -238,7 +243,7 @@ const check = (name, actual, expected) => {
     return {
       bonus: S.clearInfo.bonus,
       over: S.clearInfo.over,
-      notice: S.flashQueue.map((n) => n.text).find((t) => t.indexOf('Over achiever: ') === 0),
+      notice: recapLines(S).find((t) => t.indexOf('Over achiever: ') === 0),
     };
   };
 
@@ -670,7 +675,7 @@ const check = (name, actual, expected) => {
   check('and reports all three, not just the two that paid',
     S.clearInfo.qixesAlive, 3);
   // The end of a round is a queue of notices across the board, not a card.
-  const notices = () => S.flashQueue.map((n) => n.text);
+  const notices = () => recapLines(S);
   // At x1 there is no multiplier tail at all - '1x bonus' is not information.
   check('the recap names the capture and what it paid',
     notices().some((t) => t ===
@@ -843,7 +848,7 @@ const check = (name, actual, expected) => {
   check('a quick, thorough level pays both pots',
     [S.clearInfo.bonus, S.clearInfo.winBonus, S.score], [over, quick, over + quick]);
   check('and the recap queues a notice for each pot', (() => {
-    const texts = S.flashQueue.map((n) => n.text);
+    const texts = recapLines(S);
     return [
       texts[0],
       texts.some((t) => t ===
@@ -867,9 +872,26 @@ const check = (name, actual, expected) => {
   check('a slow level on the number pays nothing extra',
     [S.clearInfo.bonus, S.clearInfo.winBonus, S.score], [0, 0, 0]);
   check('and the recap says only that the level is clear', (() => {
-    const texts = S.flashQueue.map((n) => n.text);
+    const texts = recapLines(S);
     return [texts.length, texts[0]];
   })(), [1, 'LEVEL 4 CLEAR']);
+
+  // The recap is a stack, and it builds line by line: each line starts only once
+  // the one above it is fully in, so the stagger is exactly the fade.
+  check('each recap line starts when the one above is fully in',
+    [P.RECAP_STAGGER_MS, P.RECAP_FADE_MS], [P.RECAP_FADE_MS, P.RECAP_FADE_MS]);
+  check('and the whole stack takes the sum of its parts',
+    P.recapTotalMs(3),
+    P.RECAP_STAGGER_MS * 2 + P.RECAP_FADE_MS + P.RECAP_HOLD_MS + P.RECAP_FADE_OUT_MS);
+  check('which is quicker than showing them one at a time was',
+    P.recapTotalMs(4) < 4 * 2000, true);
+
+  // The stack holds the level, then retires itself so the next one can start.
+  S.recap = { lines: ['A', 'B'], age: 0 };
+  P.updateRecap(100);
+  check('the stack ages', [S.recap === null, S.recap && S.recap.age], [false, 100]);
+  P.updateRecap(P.recapTotalMs(2));
+  check('and retires itself when it has played out', S.recap, null);
 }
 
 // --- a Sparx caught by a claim must not freeze -------------------------------

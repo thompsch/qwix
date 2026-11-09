@@ -128,6 +128,11 @@ versions' numbers are pinned in `test/qwix.progress.mjs`.
   multiplier under `traps`, a lost share of the pot under `survivors`.
 
 The bonus multiplier is applied to every payout but **never shown**: no stat in the
+**At the end of a level every line of the recap is on the board at once** — a stack
+rather than a queue, each line fading in as the one above it finishes. Five lines
+take about three seconds, not ten, and nothing needs dismissing: the next level
+follows the stack.
+
 readout, no `3x bonus!` on a notice, no `bonus x3` on the kill banner. It still
 climbs one step every ten levels, to x9.
 - **Under Kill the Qwix the kill bonus is paid first**, whatever else the stroke

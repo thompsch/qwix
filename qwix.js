@@ -97,7 +97,15 @@
   // first moves, or after this long if the player simply sits there, so nobody
   // is hunted while they are still reading the board.
   var OPENING_GRACE_MS = 45000;
-  var NOTICE_MS = 2000;  // how long one recap notice stays on the board
+  var NOTICE_MS = 2000;       // how long a live notice (a kill, a hunting wave) stays
+  // The end-of-level recap is a stack, not a queue: every line is on the board at
+  // once, each fading in a beat after the one above it.
+  var RECAP_FADE_MS = 340;    // how long one line takes to appear
+  // Each line starts only once the one above it is fully in, so the stack builds
+  // line by line rather than all at once.
+  var RECAP_STAGGER_MS = RECAP_FADE_MS;
+  var RECAP_HOLD_MS = 1500;   // the whole stack, once the last line is in
+  var RECAP_FADE_OUT_MS = 320;
   // One Sparx, plus another every twenty levels: two from level 20, three from
   // 40, and that is as busy as the board gets.
   var SPARX_EVERY_LEVELS = 20;
@@ -249,6 +257,7 @@
       deaths: [],           // killed figures, still collapsing on screen
       flash: null,
       flashQueue: [],
+      recap: null,          // the end-of-level stack: { lines, age }
     };
     resetBoard();
     syncOverlay();
@@ -282,6 +291,7 @@
     S.deathSpot = null;
     S.flash = null;
     S.flashQueue.length = 0;
+    S.recap = null;
     S.invulnUntil = S.now + INVULN_MS;
   }
 
@@ -465,6 +475,7 @@
     // behind the notices; only a pause or a card stops it.
     if (S.state === 'playing' || S.state === 'levelclear') {
       S.anim += dt;
+      updateRecap(dt);
       updateDeaths(dt); // a kill landing on the winning stroke still plays out
     }
     if (S.state === 'playing') {
@@ -479,7 +490,7 @@
       // No card to dismiss any more: the recap plays out and the next level
       // follows it. Enter/skip still works - see confirmAction.
       S.timer -= dt;
-      if (S.timer <= 0 && !S.flash && !S.flashQueue.length) nextLevel();
+      if (S.timer <= 0 && !S.flash && !S.flashQueue.length && !S.recap) nextLevel();
     }
   }
 
@@ -936,8 +947,8 @@
     if (winBonus) notes.push('Speed bonus: ' + bigNumber(winBonus));
     if (overBonus) notes.push('Over achiever: ' + bigNumber(overBonus));
     if (S.clearInfo.faster) notes.push('The Qix is quicker from here on.');
-    for (var n = 0; n < notes.length; n++) flash(notes[n], NOTICE_MS);
-    S.timer = notes.length * NOTICE_MS + 400;
+    S.recap = { lines: notes, age: 0 };
+    S.timer = recapTotalMs(notes.length);
     S.state = 'levelclear';
     syncOverlay();
   }
@@ -1633,7 +1644,65 @@
   }
 
   /** The one banner in the game: a split just paid out. */
+  /** How long a recap of `count` lines lives, end to end. */
+  function recapTotalMs(count) {
+    return RECAP_STAGGER_MS * Math.max(0, count - 1) + RECAP_FADE_MS + RECAP_HOLD_MS +
+      RECAP_FADE_OUT_MS;
+  }
+
+  /** Advance the recap stack, and retire it once it has played out. */
+  function updateRecap(dt) {
+    if (!S.recap) return;
+    S.recap.age += dt;
+    // Retiring it here is what lets the next level start: the level-clear state
+    // waits for the stack to be gone.
+    if (S.recap.age >= recapTotalMs(S.recap.lines.length)) S.recap = null;
+  }
+
+  /**
+   * The end-of-level stack: every line on the board at once, the headline in the
+   * middle-upper third, each line below it fading in a stagger behind the one
+   * above. The whole block then fades out together.
+   */
+  function drawRecap() {
+    var r = S.recap;
+    if (!r || !r.lines.length) return;
+    var total = recapTotalMs(r.lines.length);
+    var outAt = total - RECAP_FADE_OUT_MS;
+    var fadeOut = r.age <= outAt ? 1 : Math.max(0, 1 - (r.age - outAt) / RECAP_FADE_OUT_MS);
+    if (fadeOut <= 0) return;
+
+    var headline = 26;
+    var line = 19;
+    var gap = 12;
+    var height = headline + gap;
+    for (var i = 1; i < r.lines.length; i++) height += line + gap;
+    var y = H * 0.30 - height / 2;
+
+    ctx.save();
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    for (var n = 0; n < r.lines.length; n++) {
+      var size = n === 0 ? headline : line;
+      var shown = Math.min(1, Math.max(0, (r.age - n * RECAP_STAGGER_MS) / RECAP_FADE_MS));
+      if (shown > 0) {
+        ctx.globalAlpha = shown * fadeOut;
+        ctx.font = 'bold ' + size + 'px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace';
+        ctx.fillStyle = n === 0 ? '#ffe066' : '#e8fff5';
+        ctx.shadowColor = n === 0 ? '#ff9f1a' : '#7ef7c8';
+        ctx.shadowBlur = n === 0 ? 18 : 10;
+        ctx.fillText(r.lines[n], W / 2, y + size / 2);
+      }
+      y += size + gap;
+    }
+    ctx.restore();
+  }
+
   function drawFlash() {
+    if (S.recap) {
+      drawRecap();
+      return;
+    }
     var f = S.flash;
     if (!f || f.left <= 0) return;
     var left = f.left / (f.ms || 1);
