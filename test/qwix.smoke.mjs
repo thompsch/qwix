@@ -638,16 +638,29 @@ function clearLevel(startPage, swept) {
 }
 
 // --- page 2: abandon a Stix and the fuse comes for you ---------------------
+// The fuse only lights on a line of FUSE_MIN_CELLS (20) or more, so this draws
+// well past that: a 30-cell stroke, still, and the spark walks back down it.
 {
   const page = boot();
   console.log('\nthe fuse');
   page.press('ArrowDown');
-  page.advance(400);   // a dozen cells of Stix
+  page.advance(30 * 30 + 200); // thirty cells of Stix (fast draw is 30 ms a cell)
   page.lift('ArrowDown');
-  page.advance(2200);  // stand still: the fuse lights and burns back
+  page.advance(2200 + 30 * 90); // still, then the fuse lights and burns the line
   check('standing still mid-Stix costs a life', page.lives() < 3, 'lives=' + page.lives());
   page.advance(3333);  // respawn, still carrying two lives
   check('the game carries on after a death', page.lives() === 2, 'lives=' + page.lives());
+}
+
+// ...and a line shorter than twenty is never fatal, however long it is left.
+{
+  const page = boot();
+  console.log('\na short line is safe');
+  page.press('ArrowDown');
+  page.advance(300); // ten cells: under the limit
+  page.lift('ArrowDown');
+  page.advance(6000); // stand there for six seconds
+  check('a ten-cell line left standing never lights a fuse', page.lives(), 3);
 }
 
 // --- page 2b: dying on a line puts the marker back where it began ----------
@@ -664,12 +677,14 @@ function clearLevel(startPage, swept) {
   check('the marker is up on the top edge', start.y === 0, JSON.stringify(start));
 
   page.press('ArrowDown');   // begin a Stix from here, out into open space
-  page.advance(300);
+  page.advance(30 * 30 + 200); // thirty cells: long enough for the fuse to light
   page.lift('ArrowDown');
 
-  page.advance(5000);        // fuse lights (or the Qix arrives), death, respawn
-
+  page.advance(2200 + 30 * 90); // fuse lights, burns down the line, death, respawn
   check('the line cost a life', page.lives() < 3, 'lives=' + page.lives());
+  // The marker blinks while invulnerable, so its last painted position can be a
+  // frame or two stale: let that run out before reading where it came back to.
+  page.advance(2000);
   const back = page.marker();
   check('the marker comes back to where that line started',
     back.x === start.x && back.y === start.y, JSON.stringify({ start, back }));
@@ -711,6 +726,40 @@ function clearLevel(startPage, swept) {
   );
   check('and the marker never wanders into the shading', missteps.length === 0,
     JSON.stringify(missteps.slice(0, 3)));
+}
+
+// --- the game-over card is a way back to the menu ---------------------------
+// "New game" no longer starts a run of its own: it returns the player to the
+// chooser, so the version (and the starting level, if they know the trick) is
+// theirs to pick rather than one being assumed.
+{
+  console.log('\nthe game-over card');
+  const page = boot();
+  page.confirm(); // start from the menu
+
+  // Lose the three lives to the fuse: draw a long line, then stand still and let
+  // it burn back. Repeat until the card appears (a Qix may get there first, which
+  // is just as good).
+  for (let round = 0; round < 12; round++) {
+    if (page.overlayUp() && page.overlayTitle() === 'GAME OVER') break;
+    page.press('ArrowDown');
+    page.advance(1200); // draw down into open space: a Stix long enough to burn
+    page.lift('ArrowDown');
+    page.advance(6000); // stand still: the fuse lights and walks back to the marker
+  }
+  same('three deaths bring up the game-over card',
+    [page.overlayUp(), page.overlayTitle()], [true, 'GAME OVER']);
+  same('which offers the level it ended on, and a way back to the menu',
+    [page.el('overlay-button').textContent, page.el('overlay-button-2').textContent],
+    ['Continue level 1', 'New game']);
+
+  page.el('overlay-button-2').click();
+  page.advance(60);
+  same('and New game lands on the menu',
+    [page.overlayTitle(), /Which version/.test(page.overlayBody())], ['QWIX', true]);
+  same('with both versions to choose from',
+    [page.el('overlay-button').textContent, page.el('overlay-button-2').textContent],
+    ['Capture the Qwix', 'Kill the Qwix']);
 }
 
 // --- page 4: clear a level ------------------------------------------------

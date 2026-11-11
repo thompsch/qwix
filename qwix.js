@@ -80,13 +80,9 @@
   // --- timers ---------------------------------------------------------------
   var FUSE_GRACE_MS = 420;     // how long you may stand still before it lights
   var FUSE_STEP_MS = 90;
-  // A short Stix is dangerous out of proportion to its length: the spark only has
-  // to cross a cell or two, so it reaches the marker almost the instant it lights
-  // - a one-cell line kills 90 ms after the fuse appears. Anything shorter than
-  // 50 px (five cells) is therefore given extra grace, one burn step's worth for
-  // every cell it is short, so a dab of a line is no deadlier than a long one.
-  var FUSE_SHORT_PX = 50;
-  var FUSE_SHORT_GRACE_MS = 120;
+  // Nothing lights until the line is long enough for the spark to be survivable:
+  // a two-cell Stix is reached on the first burn step, which is no warning at all.
+  var FUSE_MIN_CELLS = 20;     // squares on the Stix before the fuse may light
   var DEATH_MS = 1200;
   var INVULN_MS = 1400;
   // Sparx turn hostile - and hunt - once the marker has stood still for this long:
@@ -1372,7 +1368,7 @@
   function updateFuse(dt) {
     var p = S.player;
     var f = S.fuse;
-    if (!p.drawing || p.still < fuseGrace()) {
+    if (!fuseAllowed() || p.still < FUSE_GRACE_MS) {
       f.active = false;
       f.acc = 0;
       return;
@@ -1401,10 +1397,13 @@
    * unchanged; a one-cell dab gets 900 ms, which is the difference between a
    * reflex test the player cannot pass and a mistake they can recover from.
    */
-  function fuseGrace() {
-    var shortCells = Math.round(FUSE_SHORT_PX / CELL);
-    var under = Math.max(0, shortCells - S.player.trail.length);
-    return FUSE_GRACE_MS + under * FUSE_SHORT_GRACE_MS;
+  /**
+   * Whether a fuse may light at all. A line shorter than `FUSE_MIN_CELLS` is safe
+   * however long the marker stands there: the spark would be on top of it before
+   * the player could react, which is a death trap rather than a timer.
+   */
+  function fuseAllowed() {
+    return S.player.drawing && S.player.trail.length >= FUSE_MIN_CELLS;
   }
 
   // --- what kills you -------------------------------------------------------
@@ -2178,7 +2177,8 @@
     showCard('GAME OVER', [
       'Score ' + S.score + ' on level ' + S.level + '. Best ' + S.best + '.',
       'Continue retries level ' + S.level + ' with a fresh field and ' + START_LIVES + ' lives, keeping your score.',
-    ].join('\n'), 'Continue level ' + S.level, 'New game', 'Menu');
+      'New game goes back to the menu, so you can pick the other version.',
+    ].join('\n'), 'Continue level ' + S.level, 'New game');
   }
 
   /** Back to the version menu, so the other version is reachable without a reload. */
@@ -2371,7 +2371,10 @@
   overlay.button.addEventListener('click', confirmAction);
   overlay.button2.addEventListener('click', function () {
     if (S.state === 'gameover') {
-      newRun();
+      // "New game" is a way back to the menu, not a run of its own: the player
+      // should choose the version (and a starting level, if they know the trick)
+      // rather than have one picked for them.
+      backToMenu();
       return;
     }
     // The second version, from the menu.

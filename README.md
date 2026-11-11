@@ -27,8 +27,8 @@ The game opens on a chooser:
 The version only changes the payout: crushing a Qix is a consequence of the
 capture rule either way, so under Capture the Qwix cutting them apart actually
 *costs* you money — every Qix you lose is a share of the end-of-level pot gone.
-The game-over card has a **Menu** button, so you can switch versions without
-reloading the page.
+The game-over card's **New game** button goes back to this menu rather than
+starting a run of its own, so switching versions never needs a reload.
 
 There is also a hidden way to pick your starting level: type a number on the menu
 and the version you then click begins at that level (the card grows a
@@ -111,10 +111,10 @@ versions' numbers are pinned in `test/qwix.progress.mjs`.
   around it, glowing, so "one of them has turned" is visible without reading the
   colour of a 7-pixel cross. A patrolling one has no ring at all.
 - **The fuse** lights when the marker stops mid-draw and burns back down the
-  Stix towards you. Standing still is only safe for about 400 ms — but a short
-  line is spared a little longer, because the spark only has a cell or two to
-  cross: anything under 50 px gets 120 ms extra for every cell it is short, so a
-  one-cell dab gives you 900 ms instead of 420.
+  Stix towards you. Standing still is only safe for about 400 ms — but nothing
+  lights at all until the line is **20 squares long**: a short Stix is a death
+  trap rather than a timer, because the spark would be on the marker before it
+  could react. Twenty squares and up is 420 ms, as before.
 - **Dying on a line puts you back where that line began** — not at the top edge —
   so a long draw is a real commitment: dying near the end of one costs you the
   whole trip back to the start.

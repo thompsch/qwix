@@ -50,7 +50,7 @@ const PROBE = GAME.replace(
   + ' finishLevel, survivorBonusFor, playVersion, openHelp, closeHelp, helpText, backToMenu, continueGame, newRun,'
   + ' syncOverlay, resetBoard, nextLevel, qixCount, sparxCount, sparxStepMs, speedAtLevel,'
   + ' qixScale, chaseField, chaseStep, sparxStep, sparxCanStand, homeSparx,'
-  + ' closeClaim, updateLevelClock, sparxIdleAllowance, setHunting, fuseGrace, updateFuse, afterDeath,'
+  + ' closeClaim, updateLevelClock, sparxIdleAllowance, setHunting, fuseAllowed, FUSE_MIN_CELLS, updateFuse, afterDeath,'
   + ' chooseDir, canStep, hold, release, playerStep, updatePlayer, update, VARIANTS,'
        + ' typeDigit, backspaceDigit, clearTypedLevel, typedLevelNumber, startQixDeath, saveBest,'
        + ' updateDeaths, QIX_DEATH_MS, QIX_DEATH_RINGS, QIX_DEATH_SHARDS, levelComplete,'
@@ -121,10 +121,17 @@ const check = (name, actual, expected) => {
   check('it says what happened', els['overlay-title'].textContent, 'GAME OVER');
   check('the continue button offers the same level',
     els['overlay-button'].textContent, 'Continue level 7');
-  check('and a second button offers a fresh run',
+  check('and a second button offers a way back to the menu',
     [els['overlay-button-2'].textContent, els['overlay-button-2'].hidden], ['New game', false]);
-  check('and a third goes back to the menu',
-    [els['overlay-button-3'].textContent, els['overlay-button-3'].hidden], ['Menu', false]);
+  check('with no third button - Menu would be the same place',
+    els['overlay-button-3'].hidden, true);
+
+  // "New game" on the card is the way back to the chooser, not a run of its own:
+  // the player picks the version (and, if they know the trick, the level).
+  S.state = 'gameover';
+  P.backToMenu();
+  check('new game puts the player back on the menu', S.state, 'title');
+  check('which asks the question again', els['overlay-title'].textContent, 'QWIX');
 
   // Continue: same level, fresh board, lives back - and the score starts again.
   P.continueGame();
@@ -1129,26 +1136,30 @@ const check = (name, actual, expected) => {
     [S.awaitingFirstLine, S.sinceBoard, S.sinceLine], [true, 0, 0]);
 }
 
-// --- a short Stix gets a longer fuse ----------------------------------------
+// --- the fuse waits for a line worth lighting --------------------------------
 {
   const S = P.S;
   P.resetBoard();
   S.state = 'playing';
   const p = S.player;
 
-  const grace = (cells) => {
-    p.trail = new Array(cells).fill(0);
-    return P.fuseGrace();
-  };
-  check('a line of 50 px or more keeps the usual 420 ms',
-    [grace(5), grace(6), grace(40)], [420, 420, 420]);
-  check('a cell short of 50 px buys another 120 ms',
-    [grace(4), grace(3), grace(2)], [540, 660, 780]);
-  check('and a one-cell dab gets 900 ms',
-    grace(1), 900);
+  check('a line has to be twenty squares before a fuse may light', P.FUSE_MIN_CELLS, 20);
 
-  // The fuse itself uses it: half a second of stillness, which used to light a
-  // one-cell Stix, now does not.
+  const allowed = (cells) => {
+    p.drawing = true;
+    p.trail = new Array(cells).fill(0);
+    return P.fuseAllowed();
+  };
+  check('nothing short of twenty is allowed to burn',
+    [allowed(1), allowed(5), allowed(19)], [false, false, false]);
+  check('twenty and up is', [allowed(20), allowed(40)], [true, true]);
+  check('and a marker that is not drawing has no fuse at all', (() => {
+    p.drawing = false;
+    p.trail = new Array(40).fill(0);
+    return P.fuseAllowed();
+  })(), false);
+
+  // The fuse itself: a two-cell Stix standing still for a minute never lights.
   const lightAfter = (cells, still) => {
     p.drawing = true;
     p.trail = new Array(cells).fill(0);
@@ -1159,9 +1170,8 @@ const check = (name, actual, expected) => {
     P.updateFuse(16);
     return S.fuse.active;
   };
-  check('half a second does not light a one-cell fuse',
-    lightAfter(1, 500), false);
-  check('but the longer grace does', lightAfter(1, 900), true);
+  check('a short line standing still for a minute never lights',
+    [lightAfter(2, 60000), lightAfter(19, 60000)], [false, false]);
   check('a long line still lights at 420 ms', lightAfter(20, 420), true);
   check('and not a millisecond before', lightAfter(20, 419), false);
   p.drawing = false;
