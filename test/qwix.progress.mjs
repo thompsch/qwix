@@ -1143,16 +1143,16 @@ const check = (name, actual, expected) => {
   S.state = 'playing';
   const p = S.player;
 
-  check('a line has to be twenty squares before a fuse may light', P.FUSE_MIN_CELLS, 20);
+  check('a line has to be ten squares before a fuse may light', P.FUSE_MIN_CELLS, 10);
 
   const allowed = (cells) => {
     p.drawing = true;
     p.trail = new Array(cells).fill(0);
     return P.fuseAllowed();
   };
-  check('nothing short of twenty is allowed to burn',
-    [allowed(1), allowed(5), allowed(19)], [false, false, false]);
-  check('twenty and up is', [allowed(20), allowed(40)], [true, true]);
+  check('nothing short of ten is allowed to burn',
+    [allowed(1), allowed(5), allowed(9)], [false, false, false]);
+  check('ten and up is', [allowed(10), allowed(40)], [true, true]);
   check('and a marker that is not drawing has no fuse at all', (() => {
     p.drawing = false;
     p.trail = new Array(40).fill(0);
@@ -1171,9 +1171,10 @@ const check = (name, actual, expected) => {
     return S.fuse.active;
   };
   check('a short line standing still for a minute never lights',
-    [lightAfter(2, 60000), lightAfter(19, 60000)], [false, false]);
+    [lightAfter(2, 60000), lightAfter(9, 60000)], [false, false]);
   check('a long line still lights at 420 ms', lightAfter(20, 420), true);
   check('and not a millisecond before', lightAfter(20, 419), false);
+  check('a line of exactly the minimum lights too', lightAfter(10, 420), true);
   p.drawing = false;
   p.still = 0;
 }

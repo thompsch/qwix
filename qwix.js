@@ -82,7 +82,8 @@
   var FUSE_STEP_MS = 90;
   // Nothing lights until the line is long enough for the spark to be survivable:
   // a two-cell Stix is reached on the first burn step, which is no warning at all.
-  var FUSE_MIN_CELLS = 20;     // squares on the Stix before the fuse may light
+  // Ten squares is the floor: about 900 ms of burn before it reaches the marker.
+  var FUSE_MIN_CELLS = 10;     // squares on the Stix before the fuse may light
   var DEATH_MS = 1200;
   var INVULN_MS = 1400;
   // Sparx turn hostile - and hunt - once the marker has stood still for this long:

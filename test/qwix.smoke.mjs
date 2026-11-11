@@ -652,15 +652,15 @@ function clearLevel(startPage, swept) {
   check('the game carries on after a death', page.lives() === 2, 'lives=' + page.lives());
 }
 
-// ...and a line shorter than twenty is never fatal, however long it is left.
+// ...and a line shorter than ten is never fatal, however long it is left.
 {
   const page = boot();
   console.log('\na short line is safe');
   page.press('ArrowDown');
-  page.advance(300); // ten cells: under the limit
+  page.advance(180); // six cells: under the limit
   page.lift('ArrowDown');
   page.advance(6000); // stand there for six seconds
-  check('a ten-cell line left standing never lights a fuse', page.lives(), 3);
+  check('a six-cell line left standing never lights a fuse', page.lives(), 3);
 }
 
 // --- page 2b: dying on a line puts the marker back where it began ----------

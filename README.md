@@ -112,9 +112,9 @@ versions' numbers are pinned in `test/qwix.progress.mjs`.
   colour of a 7-pixel cross. A patrolling one has no ring at all.
 - **The fuse** lights when the marker stops mid-draw and burns back down the
   Stix towards you. Standing still is only safe for about 400 ms — but nothing
-  lights at all until the line is **20 squares long**: a short Stix is a death
+  lights at all until the line is **10 squares long**: a short Stix is a death
   trap rather than a timer, because the spark would be on the marker before it
-  could react. Twenty squares and up is 420 ms, as before.
+  could react. Ten squares and up gets the usual 420 ms.
 - **Dying on a line puts you back where that line began** — not at the top edge —
   so a long draw is a real commitment: dying near the end of one costs you the
   whole trip back to the start.
